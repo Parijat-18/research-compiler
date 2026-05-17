@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "paper-compiler": {
+      "command": "python",
+      "args": [
+        "-m",
+        "paper_compiler_mcp.server"
+      ],
+      "env": {
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/server/src",
+        "PAPER_COMPILER_RESEARCH_DIR": "${PWD}/research"
+      }
+    }
+  }
+}

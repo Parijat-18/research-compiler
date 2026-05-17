@@ -1,0 +1,13 @@
+{
+  "name": "paper-compiler",
+  "description": "Compile a research paper and its citation neighborhood into an implementation-ready memory for Claude Code.",
+  "version": "0.1.0",
+  "author": {
+    "name": "TODO",
+    "email": "TODO"
+  },
+  "homepage": "https://github.com/TODO/paper-compiler",
+  "repository": "https://github.com/TODO/paper-compiler",
+  "license": "MIT",
+  "keywords": ["research", "papers", "reproducibility", "rag", "mcp", "semantic-scholar"]
+}
