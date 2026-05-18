@@ -1,6 +1,12 @@
 ---
 name: audit-against-research
-description: Use this skill when finishing an implementation, reviewing a PR, or when the user asks to verify that code matches the paper. Cross-checks the repository against research/research.md and the paper-compiler MCP graph, flags missing or divergent components, and produces an audit report.
+description: Cross-check the repo against the compiled paper-compiler context and flag missing / divergent / partial implementations. Use when finishing a paper implementation, reviewing a PR derived from a paper, or when the user explicitly asks "audit my code against the paper", "is this faithful to <paper>?", "check my reproduction". Produces `audit-report.md` with per-atom verdicts. Warn-only — never auto-fixes.
+when_to_use: Activates when research/ exists and the user is reviewing, finishing, or PR-prepping paper-derived code.
+paths:
+  - research/research.md
+  - src/**/*.py
+  - "**/*.py"
+  - "**/*.ipynb"
 allowed-tools:
   - Read
   - Grep
@@ -11,56 +17,54 @@ allowed-tools:
   - mcp__paper-compiler__get_evidence
   - mcp__paper-compiler__list_missing_details
   - mcp__paper-compiler__graph_stats
+  - mcp__paper-compiler__neighborhood_subgraph
+  - mcp__paper-compiler__graph_sql
 ---
 
-# Audit implementation against compiled research context
+# audit-against-research
 
-## Trigger
-
-Activate when **any** of the following:
-
-- The user asks to review, audit, or verify the implementation against the paper.
-- The user has just finished a major implementation milestone (e.g. "I think I'm done").
-- A PR is being prepared from work originating in a paper.
+Verdict per atom. Short, structured, unhedged. See
+`references/audit-checklist.md` for the per-category audit recipes.
 
 ## Procedure
 
-1. **Read `research/research.md`** to load the expected implementation atoms.
-2. **List required atoms** via `graph_stats()` and the architecture / loss / dataset / evaluation traces.
-3. **For each required atom**, search the repo for evidence of implementation:
-   - Use `Grep` / `Glob` to find candidate files.
-   - Read the implementing code.
-   - Compare against `get_evidence(<atom-id>)`.
-4. **Score each atom** as: `IMPLEMENTED`, `PARTIAL`, `MISSING`, `DIVERGENT`.
-5. **For each non-IMPLEMENTED atom**, generate a one-line summary of the gap.
-6. **Cross-check `list_missing_details()`** — for every open assumption, confirm the code makes a visible choice and that choice is justified.
-7. **Produce the audit report** using the template below.
+1. Read `research/research.md`.
+2. List required atoms via `graph_stats()` + the four traces (architecture,
+   loss, dataset, evaluation). Cap at top 25 by `priority`.
+3. For each atom, run the category-specific audit from
+   `references/audit-checklist.md` and score: `IMPLEMENTED` / `PARTIAL` /
+   `MISSING` / `DIVERGENT`.
+4. Cross-check `list_missing_details()`: every open assumption must show as a
+   visible choice in the code (comment, config value, named variable).
+5. Write `audit-report.md` using the template below.
 
 ## Audit report template
 
 ```
-Paper: <title>
-Atoms expected: <N>
-- Implemented: <count>
-- Partial:     <count>
-- Missing:     <count>
-- Divergent:   <count>
+Paper: <title>  (<atom_count> required atoms)
 
-Findings:
-- [MISSING]   <atom-name>: <one-line gap>
-- [DIVERGENT] <atom-name>: <code says X, brief says Y>
-- [PARTIAL]   <atom-name>: <what's there, what's not>
+| Status      | Count |
+| :---------- | ----: |
+| Implemented |   ... |
+| Partial     |   ... |
+| Missing     |   ... |
+| Divergent   |   ... |
 
-Open assumptions still unflagged in code:
-- <missing-detail-id>: <one-liner>
+## Findings
+- [MISSING]   atom-NNN <name>: <one-line gap, file ref if relevant>
+- [DIVERGENT] atom-NNN <name>: code says <X>, brief says <Y> (chunk_id=N)
+- [PARTIAL]   atom-NNN <name>: <what's there, what's not>
 
-Recommended next steps:
+## Unflagged assumptions
+- md-NNN: <one-liner>
+
+## Recommended next steps
 1. ...
 ```
 
 ## Rules
 
-- Only flag DIVERGENT when you have evidence from the MCP graph that contradicts the code. Mere stylistic disagreement is not divergence.
-- For ambiguous atoms (e.g. "preprocessing"), require the code to make a single, named, commented choice — not "any of these would work."
-- Do not auto-fix divergences. Surface them. The user decides.
-- The audit report is the deliverable. Keep it short, structured, and unhedged.
+- Only flag DIVERGENT with evidence (cite chunk_id or atom_id). Stylistic
+  disagreement is not divergence.
+- Do not auto-fix. The user decides.
+- Keep the report short — Claude reads it next session.

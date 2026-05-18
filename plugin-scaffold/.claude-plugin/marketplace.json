@@ -1,0 +1,11 @@
+{
+  "name": "paper-compiler-marketplace",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "paper-compiler",
+      "source": ".",
+      "description": "Compile a research paper and its citation neighborhood into an implementation-ready memory for Claude Code."
+    }
+  ]
+}

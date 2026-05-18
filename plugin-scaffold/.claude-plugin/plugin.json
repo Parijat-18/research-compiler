@@ -3,11 +3,11 @@
   "description": "Compile a research paper and its citation neighborhood into an implementation-ready memory for Claude Code.",
   "version": "0.1.0",
   "author": {
-    "name": "TODO",
-    "email": "TODO"
+    "name": "Parijat Chaudhuri",
+    "email": "parijat.c@paradigmit.com"
   },
-  "homepage": "https://github.com/TODO/paper-compiler",
-  "repository": "https://github.com/TODO/paper-compiler",
+  "homepage": "https://github.com/Parijat-18/paper-compiler",
+  "repository": "https://github.com/Parijat-18/paper-compiler",
   "license": "MIT",
   "keywords": ["research", "papers", "reproducibility", "rag", "mcp", "semantic-scholar"]
 }

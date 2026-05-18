@@ -1,0 +1,21 @@
+slug,paper_id,title
+clip,arxiv:2103.00020,Learning Transferable Visual Models From Natural Language Supervision
+simclr,arxiv:2002.05709,A Simple Framework for Contrastive Learning of Visual Representations
+bert,arxiv:1810.04805,BERT: Pre-training of Deep Bidirectional Transformers
+vit,arxiv:2010.11929,An Image is Worth 16x16 Words
+mae,arxiv:2111.06377,Masked Autoencoders Are Scalable Vision Learners
+dpo,arxiv:2305.18290,Direct Preference Optimization
+flashattention,arxiv:2205.14135,FlashAttention
+swin,arxiv:2103.14030,Swin Transformer
+diffusion,arxiv:2006.11239,Denoising Diffusion Probabilistic Models
+latent_diffusion,arxiv:2112.10752,High-Resolution Image Synthesis with Latent Diffusion Models
+chinchilla,arxiv:2203.15556,Training Compute-Optimal Large Language Models
+llama,arxiv:2302.13971,LLaMA: Open and Efficient Foundation Language Models
+mixtral,arxiv:2401.04088,Mixtral of Experts
+dreamerv2,arxiv:2010.02193,Mastering Atari with Discrete World Models
+codebert,arxiv:2002.08155,CodeBERT
+mlp_mixer,arxiv:2105.01601,MLP-Mixer
+pinsage,arxiv:1806.01973,Graph Convolutional Neural Networks for Web-Scale Recommender Systems
+nerf,arxiv:2003.08934,NeRF
+gpt2,doi:10.5281/zenodo.13133380,GPT-2 (no arXiv; placeholder DOI)
+alphafold2,doi:10.1038/s41586-021-03819-2,AlphaFold 2

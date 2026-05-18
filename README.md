@@ -1,124 +1,251 @@
-# Research Compiler for Claude Code — Starter Bundle
+# research-compiler
 
-This bundle is everything you need to start building **paper-compiler**, a Claude Code plugin that compiles a research paper and its citation neighborhood into an implementation-ready memory for coding agents.
+> A research paper is a compressed implementation artifact. The detail a coding agent needs to actually reproduce it lives *across the citation neighborhood* — in the cited methods, datasets, baselines, prior architectures, evaluation protocols. **research-compiler** is a Claude Code plugin that compiles that neighborhood into a queryable Graph RAG store and a Karpathy-style llm-wiki, then teaches Claude — through skills and MCP tools — which lever to pull for which sub-task.
 
-You came in with a clear hypothesis and a synthesis of the prior work. This bundle turns that into a buildable project: a PRD, a reading map, a plugin guide, a system architecture, an evaluation plan, and a working plugin scaffold you can `claude --plugin-dir` against on day one.
-
----
-
-## The one-paragraph framing
-
-> AI research papers are compressed implementation artifacts, not engineering specifications. Their missing implementation context is distributed across the citation neighborhood — cited methods, datasets, baselines, equations, evaluation protocols, prior architectures, experimental conventions. **paper-compiler** ingests a target paper, uses Semantic Scholar as a scholarly graph backbone, parses available PDFs/TeX/source locally, recursively expands the citation tree, classifies each citation edge by *implementation role*, builds an implementation atom graph, and emits a `research.md` dossier plus queryable MCP tools that Claude Code uses while writing the repo.
-
-The thesis being tested:
-
-> A Claude Code session given the target paper **plus** a compiled `research.md` and MCP query tools produces more faithful paper reproductions than a Claude Code session given only the target paper.
-
-The evaluation plan operationalizes "more faithful" along correctness, coverage, and hallucination rate, and tells you the bar to clear before shipping.
+A single command turns one arXiv ID into ~250 papers, ~150 implementation atoms, ~6,000 indexed prose chunks, three detected research communities, and a regenerable wiki — all sitting in `research/` next to your code, addressable by stable IDs, served read-only over MCP.
 
 ---
 
-## What's in this bundle
+## The hypothesis
+
+PaperBench (2025) measured what we already suspected: frontier models reproduce papers at ~21%, and the dominant failure mode is *missing implementation context* — the kind of detail that lives one citation hop away. Existing paper-to-code systems start from the target PDF and ignore that neighborhood. We compile it.
+
+The thesis being tested, in three operational conditions:
+
+| Condition   | Setup                                        | Predicted outcome                                                                                                  |
+| ----------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **A** | Claude Code + target paper PDF               | baseline                                                                                                           |
+| **B** | Claude Code + compiled `research.md` brief | most of the lift                                                                                                   |
+| **C** | Claude Code + brief + Graph RAG MCP + wiki   | **+10pp over A**, hallucination halved, atom coverage ≥1.5×, last 3-5pp of accuracy on cross-paper queries |
+
+The plugin succeeds or fails as that research claim. The evaluation rubric lives in `docs/05-evaluation-plan.md`.
+
+---
+
+## What this adds to Claude Code
+
+Three primitives — **skills**, **MCP server**, **forked subagent** — composed into a single plugin so the workflow is one prompt away.
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                  Claude Code session (user-facing)                 │
+│   /paper-compiler:build-research-context arxiv:2603.19312          │
+│   /paper-compiler:use-research-context     (auto-invoke)           │
+│   /paper-compiler:audit-against-research   (auto-invoke)           │
+│   /paper-compiler:wiki-query / wiki-ingest / wiki-lint             │
+│   15 mcp__paper-compiler__* tools                                  │
+└─────────┬──────────────────────────────────────────▲───────────────┘
+          │ queries                                  │ structured evidence
+          ▼                                          │
+┌────────────────────────────────────────────────────────────────────┐
+│            paper-compiler MCP server  (read-only)                  │
+│  sqlite + sqlite-vec + FTS5; lazy-loaded; ~26 MB per paper         │
+└─────────┬──────────────────────────────────────────────────────────┘
+          │                                                          
+          ▼                                                          
+┌────────────────────────────────────────────────────────────────────┐
+│              research/  (lives in your repo, git-friendly)         │
+│   research.md       — ≤ 8000-token brief                           │
+│   research.db       — Graph RAG store                              │
+│   SCHEMA.md         — DB schema reference for Claude               │
+│   evidence/<atom>.md — per-atom verbatim spans                     │
+│   wiki/             — Karpathy llm-wiki (atoms, papers,            │
+│                       communities, promoted answers, log)          │
+└─────────▲──────────────────────────────────────────────────────────┘
+          │ writes (compile-time only)                              
+          │                                                          
+┌────────────────────────────────────────────────────────────────────┐
+│       paper-compiler CLI  — runs once, in a forked subagent        │
+│   resolve → acquire → parse → expand → classify → atom-extract →   │
+│   score → render → build DB → communities → wiki                   │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The strict separation is the point. The CLI **never** serves runtime queries; the MCP server **never** writes. A stale DB diagnosed without re-running a compile. A buggy tool replaced without re-acquiring papers. The wiki regenerated as a pure function of the DB.
+
+---
+
+## What it does well (and the tasks it actually simplifies)
+
+**Implementing a paper from scratch.** Ask Claude `implement the CEM planner from this paper`. The `use-research-context` skill auto-activates, consults its `references/implementing-loss.md` playbook, calls `trace_dependency("optimizer")`, pulls evidence, queries the defining paper's full text, writes the planner with `[[atom-013|CEM]]` citations grounded in verbatim spans. No web search, no hallucinated hyperparameters.
+
+**Cross-paper questions the PDF won't answer.** `/paper-compiler:wiki-query What's the relationship between SIGReg and InfoNCE in this corpus?` — `wiki-query` hits atom search, walks the citation subgraph, pulls chunks from multiple papers, synthesizes a 2-8 paragraph answer, and *promotes* it to `wiki/answers/<slug>.md` if it cites ≥ 2 atoms across ≥ 2 communities. The next session inherits the prior session's reasoning instead of re-discovering it.
+
+**Auditing your implementation against the paper.** `/paper-compiler:audit-against-research` walks every atom that maps to your code and produces a per-atom verdict with citations. PR review for paper reproductions.
+
+**Growing the corpus during use.** `/paper-compiler:wiki-ingest arxiv:2305.18290` adds one more paper (1-5 min), recomputes communities, refreshes wiki articles, appends to `wiki/log.md`. The plugin's knowledge base grows alongside the implementation work.
+
+**Resumability.** Every CLI stage is content-addressed and cached. Rerunning a compile after a parser fix doesn't re-acquire papers; it re-parses and rebuilds from the cache.
+
+---
+
+## How it cuts token usage
+
+The system is built to *replace* web search for paper-specific facts.
+
+| Mechanism                           | Effect                                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Snippet-first MCP tools**   | `query_chunks` and `paper_text` return 240-char previews + `chunk_id`. Full text requires `full=True`.                                               |
+| **Quality-filtered indexing** | Only ~40% of chunks (the prose ones — tables, captions, layout, references list are excluded) participate in FTS5/vec search.                               |
+| **Per-paper diversification** | `max_per_paper=2` stops one mega-paper from crowding out the neighborhood in a single result set.                                                          |
+| **Per-skill `references/`** | Heavy task-specific guidance lives in `references/<task>.md`, loaded only when the skill body explicitly points to it. Skill bodies stay ≤ 100-150 lines. |
+| **Compile-time LLM caps**     | `--classifier-llm-calls` and `--atom-llm-calls` bound the LLM cost of *building* the store; runtime queries cost only the MCP-result tokens.           |
+| **Wiki promotion**            | Synthesized cross-paper answers become addressable files. Future sessions `Read()` an answer instead of re-running the synthesis.                          |
+
+Empirically on the JEPA build: a five-turn implementation session — *plan → implement CEM → implement loss → audit → wiki-query on a subtlety* — consumes ~25K MCP-result tokens. The equivalent web-search workflow, where the agent re-reads the PDF every turn, runs **~6×** that.
+
+---
+
+## What a compile actually produces
+
+Verified on `arxiv:2603.19312` (LeWorldModel/JEPA), 2026-05-18:
+
+| Artifact                        | Result                                                                                                                        |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Wall time                       | 1052 s (~18 min)                                                                                                              |
+| References attempted / resolved | 52 / 29 (55.8%)                                                                                                               |
+| Neighborhood                    | **256 papers** (134 acquired + parsed, 122 metadata-only)                                                               |
+| Chunks                          | 14,228 total →**5,672 indexed** (quality filter dropped 60%)                                                           |
+| Atoms (post-dedup)              | **153**, across 9 categories, defined by 14 distinct papers                                                             |
+| Edges classified                | 42 (8 LLM, 34 heuristic)                                                                                                      |
+| Communities detected            | **3** — "JEPA World Models" (22 papers), "Visual World Models Planning" (4), "Graph-Based Adaptive Robot Dynamics" (3) |
+| Wiki articles                   | **433** (152 atoms + 256 papers + 3 communities + index + SCHEMA + log + 19 evidence files)                             |
+| DB size on disk                 | 28.9 MB                                                                                                                       |
+| LLM backend                     | `claude_cli` (no API key; used the Claude Code subscription auth)                                                           |
+
+---
+
+## The MCP surface (15 tools, grouped)
+
+```
+paper_summary            citation_neighbors
+find_atom                get_evidence            compare_methods
+trace_dependency         equation_lookup         (stub — see Limitations)
+query_chunks             paper_text              ← hybrid BM25 + vec, snippet-first
+neighborhood_subgraph    shortest_path           ← Graph traversal over papers + atoms
+list_communities         community_summary
+list_missing_details     graph_stats             schema_doc            graph_sql (read-only escape hatch)
+```
+
+Hybrid retrieval = FTS5 over chunk text + sqlite-vec KNN on `bge-small` 384-dim embeddings, merged with a quality prior, diversified per paper. The escape hatch (`graph_sql`) accepts arbitrary `SELECT`/`WITH` for when the structured tools don't fit.
+
+---
+
+## Quick start
+
+```bash
+# Install
+pip install -e plugin-scaffold/cli[graph,indexes] \
+            -e plugin-scaffold/server[vector]
+
+# Persist your Semantic Scholar key
+echo 'SEMANTIC_SCHOLAR_API_KEY=s2k-...' >> .env
+
+# Launch Claude Code with the plugin
+mkdir -p ~/work/paper-impl && cd ~/work/paper-impl && git init
+claude --plugin-dir /path/to/plugin-scaffold
+```
+
+Inside Claude Code:
+
+```
+/paper-compiler:build-research-context arxiv:2603.19312
+```
+
+5-20 minutes in a forked subagent. Then ask Claude to implement, audit, or query — `use-research-context` and `audit-against-research` auto-activate when `research/` exists.
+
+For the full pipeline walkthrough, see [`docs/v1_build.md`](docs/v1_build.md) — the single source of truth for what's implemented and how it behaves at every stage.
+
+---
+
+## Repository layout
 
 ```
 research-compiler/
-├── README.md                              ← you are here
+├── README.md                       ← you are here
 ├── docs/
-│   ├── 01-PRD.md                          Product requirements — what we're building and why
-│   ├── 02-research-context.md             Prior work, reading order, where we fit
-│   ├── 03-claude-code-plugin-guide.md     How to build the plugin (the hands-on doc)
-│   ├── 04-architecture.md                 System design and data model
-│   └── 05-evaluation-plan.md              A/B protocol for proving the hypothesis
-└── plugin-scaffold/                       Working v0.1 plugin (stubs, but loads in Claude Code)
-    ├── .claude-plugin/plugin.json
-    ├── skills/
-    │   ├── build-research-context/SKILL.md
-    │   ├── use-research-context/SKILL.md
-    │   └── audit-against-research/SKILL.md
+│   ├── 01-PRD.md                   product requirements + 11-role label set
+│   ├── 02-research-context.md      prior work, reading order
+│   ├── 03-claude-code-plugin-guide.md
+│   ├── 04-architecture.md          three-plane system design
+│   ├── 05-evaluation-plan.md       A/B/C protocol
+│   └── v1_build.md                 implementation reference, 1100+ lines
+└── plugin-scaffold/                the actual plugin
+    ├── .claude-plugin/{plugin.json, marketplace.json}
     ├── .mcp.json
-    ├── server/                            Bundled MCP server (stub)
-    ├── cli/                               CLI compiler (stub)
-    ├── hooks/                             Warn-only assumption hook
-    ├── scripts/
-    ├── CLAUDE.md
-    └── README.md
+    ├── cli/                        9-stage compilation pipeline
+    ├── server/                     read-only MCP server (FastMCP)
+    ├── skills/                     6 skills with references/
+    ├── hooks/                      warn-only assumption hook
+    └── scripts/
 ```
 
 ---
 
-## How to use this bundle
+## Current limitations — open for collaboration
 
-### If you have 30 minutes today
+The honest list. These are the places the design hits its edges; each is something I'd like to work on with anyone who cares about it.
 
-1. Read `docs/01-PRD.md` end-to-end.
-2. From the scaffold directory, run `claude --plugin-dir ./plugin-scaffold` in a fresh test repo.
-3. Invoke `/paper-compiler:build-research-context arxiv:2310.06825` and confirm the stub runs.
-4. List MCP tools — `mcp__paper-compiler__graph_stats` and friends should appear.
+**Stability**
 
-You now have a confirmed-working wiring loop. The whole rest of the project is replacing stubs with real implementations behind stable interfaces.
+- **Atom-id reshuffle on recompile.** Sequential `atom-001..NNN` ids are reassigned every compile. Wiki answers that cite `atom-013` may end up pointing somewhere else after the next build. **v0.3 blocker.** Fix is deterministic ids derived from `(category, canonical_name)`.
+- **Wiki articles regenerated wholesale.** Hand-edits to generated articles (`atoms/`, `papers/`, `communities/`) are lost. Only `answers/` survives. Intentional, but surprising — worth a non-destructive editing mode.
 
-### If you have a week
+**Coverage**
 
-Follow the day-by-day reading order in `docs/02-research-context.md §6`. By Friday you will have:
+- **Reference resolution lands at 45-65%.** The unresolved tail is workshop papers, software releases, technical reports — sometimes implementation-critical. Improvements: batched S2 calls (currently per-reference), better disambiguation on same-title hits, optional Crossref fallback.
+- **Tables and figure contents are stripped.** Ablation tables with hyperparameter comparisons carry real signal but die at the digit-ratio rule. Right fix is per-table classification, not blanket exclusion.
+- **No OCR on diagrams.** Architecture diagrams that explain layer wiring are invisible.
 
-- A working mental model of the four research areas you're standing on.
-- Hand-labelled 30 citation contexts with the 11-role label set (and learned whether the label set works).
-- Read the PaperBench failure modes (your real requirements list).
-- Picked a PDF parser by running 2–3 candidates on the same paper.
+**Accuracy**
 
-### If you're ready to build
+- **Edge classifier ~72% per-role on a 100-edge dev sample** (target was 75%). Heuristic is confident-wrong sometimes; the LLM residual only fires when heuristic confidence is *low*, so it never sees the confidently-wrong cases.
+- **Atom extraction is bimodal.** Clean method paragraphs nail it; short or notation-heavy paragraphs return 0-1 atoms.
+- **Multi-paper atom extraction skews the distribution** toward citation-rich subfields. A JEPA paper citing 10 robotics papers ends up with robotics atoms dominating. Tunable via `--atom-papers N`, not eliminated.
 
-Follow the milestone plan in `docs/04-architecture.md §11`. The discipline is:
+**Communities**
 
-- **M0** is wiring. Don't write the real CLI until the skills and MCP tools appear correctly.
-- **M1** is one paper through the parser. Don't expand the neighborhood until one paper round-trips cleanly.
-- **M2** is the classifier. Hand-label first, then build. You will save a week.
-- **M3** is the real `research.md`. The hardest part is keeping it under the token budget.
-- **M4** is the MCP server with real indexes.
-- **M5** is polish + the self-compile gate.
-- **M6** is the A/B evaluation per `docs/05-evaluation-plan.md`.
+- **Louvain resolution = 1.4 is a magic number** that worked on JEPA. Other corpora may want 1.0 or 2.0. No auto-tuning yet.
+- **Wholesale recompute on every ingest.** Fine for ≤ 500 papers; needs delta updates beyond that.
 
-Hard rule before M6: the plugin must compile its own originating paper(s) end-to-end without manual intervention. If it can't compile its own grandparents, it isn't ready to compile yours.
+**Wiki / lint**
 
----
+- **`wiki-lint` is structural only** (broken wikilinks, orphans, log size). It does *not* catch semantic contradictions across papers or answers. The v2 plan is an LLM-driven semantic lint.
+- **No HTML wiki viewer.** Obsidian works today (the wikilink syntax matches) but isn't shippable as part of the plugin.
 
-## The five key decisions baked into this design
+**MCP server**
 
-These are the design calls the docs assume; if you disagree with any of them, that's the place to push back before writing code.
+- **`equation_lookup` is a stub.** The `equations` table is populated; the client isn't wired. Cheap to fix.
+- **Cold start ~1.5 s** (bge-small load). Held in module state after, but the first call pays the cost.
+- **`graph_sql` SELECT/WITH check is prefix-based.** Safe locally; not network-safe.
 
-1. **Plugin, not standalone CLI.** The packaging is the product. A CLI alone would force users to glue the workflow themselves, and we know from PaperBench they don't.
-2. **Local parsed text is the source of truth; Semantic Scholar is the resolver.** This keeps us honest about evidence and gives us a path to offline / high-volume use via the Datasets API.
-3. **Implementation atoms as first-class graph nodes.** Not papers, not citations alone. This is where most of the contribution lives. Don't compromise it for ease of implementation.
-4. **Compile-time vs. query-time separation.** Heavy work happens once in a forked subagent. The MCP server is read-only at runtime. Anything that blurs this boundary is a bug.
-5. **Evaluate against a held-out paper set with a PaperBench-style rubric.** The project succeeds or fails as a research claim, not as a polished tool.
+**CLI**
 
----
+- **`paper-compiler cache prune` is a stub.** Cache grows monotonically — 50-200 MB per compiled paper.
+- **Single S2 key.** No rotation.
 
-## Glossary
+**Evaluation**
 
-- **Atom / implementation atom.** A reusable implementation component (an architecture block, a loss formulation, a dataset, a preprocessing step, an evaluation protocol, etc.). The unit our graph is organized around.
-- **Citation edge role.** The implementation role of a citation: `architecture_dependency`, `loss_function_dependency`, `dataset_dependency`, etc. (See PRD §12 for the full label set.)
-- **Implementation influence.** A score we compute for each paper in the neighborhood based on how much it contributes to a faithful reproduction, distinct from its scholarly citation count.
-- **Brief / research.md.** The compact, human-and-agent-readable summary of the compiled context. The index, not the database.
-- **Evidence span.** A verbatim quote from a real paper with section and page references, backing one or more atoms.
-- **Frontier policy.** The rule for which papers to expand at the next hop during citation-graph expansion. Prevents combinatorial blowup.
-- **Compile plane / storage plane / query plane.** The three runtime layers; see `04-architecture.md §1`.
+- **The 60-run PaperBench study from `docs/05` hasn't been run yet.** The hypothesis sits unproven. This is the highest-impact open work: pick the held-out paper set, run all three conditions, score with the rubric.
+
+If any of these resonate, open an issue or get in touch (parijat690@gmail.com). The fastest things to land are: stable atom ids, equation tool wiring, `cache prune`, and a Crossref fallback for reference resolution. The most ambitious is the evaluation harness.
 
 ---
 
-## What this bundle deliberately does NOT contain
+## Five design decisions baked in (push back here, not at code review)
 
-- Code for the real parser. Picking it is a week-4 decision (`04-architecture.md §12`); doing it earlier in this document would be premature.
-- A list of which 20 papers to evaluate on. See `05-evaluation-plan.md §3`; finalize the set after M3, not before.
-- A budget / business model. This is a research/dev document, not a launch plan.
-- A literature review beyond the four areas in `02-research-context.md`. If you find yourself wanting more, re-read the "things to not read" section.
+1. **Plugin, not a standalone CLI.** The packaging *is* the product. PaperBench showed that asking users to glue a workflow together is the failure mode.
+2. **Local parsed text is the source of truth; Semantic Scholar is the resolver.** Keeps the system honest about evidence and gives a path to offline / high-volume use.
+3. **Implementation atoms as first-class graph nodes.** Not papers, not citations alone. This is where most of the contribution lives.
+4. **Compile-time vs. query-time separation.** Heavy work runs once in a forked subagent. The MCP server is read-only at runtime. Anything that blurs this boundary is a bug.
+5. **Evaluate against a held-out paper set with a PaperBench-style rubric.** Succeeds or fails as a research claim, not a polished tool.
 
 ---
 
-## A short pep talk
+## Pointers
 
-The reason this project is worth building is that the failure mode it targets is real, reproducible, and not addressed by anything currently on the shelf. PaperBench gave us a 21% number to beat. Existing paper-to-code systems start from the target PDF and ignore the citation neighborhood — the very place where the missing details actually live. Claude Code's plugin/skill/MCP/subagent primitives are the right shape for compiling and serving that context to a coding agent.
-
-The risk is over-scoping. Resist building the literature-review tool, the citation visualizer, the hosted backend, the multilingual support, the auto-fix-the-divergence button. Build the smallest version of the implementation memory that proves the hypothesis. The evaluation plan will tell you whether to keep going.
-
-Good luck.
+- Implementation reference: [`docs/v1_build.md`](docs/v1_build.md)
+- Product requirements + 11-role label set: [`docs/01-PRD.md`](docs/01-PRD.md)
+- Three-plane architecture: [`docs/04-architecture.md`](docs/04-architecture.md)
+- Evaluation protocol: [`docs/05-evaluation-plan.md`](docs/05-evaluation-plan.md)
+- Karpathy's llm-wiki gist (the wiki design ancestor): https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f

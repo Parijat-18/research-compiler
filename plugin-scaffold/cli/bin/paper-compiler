@@ -1,106 +1,18 @@
 #!/usr/bin/env python3
-"""
-paper-compiler CLI (v0.1 scaffold)
+"""Wrapper shim for paper-compiler CLI.
 
-Stub entry point. Real implementation: see docs/04-architecture.md §3 (nine-stage pipeline).
-
-Usage:
-    paper-compiler resolve <id-or-url>
-    paper-compiler build <paper-id> --out <dir>
-    paper-compiler cache prune --older-than <duration>
+Adds the bundled cli/src directory to sys.path so the script works without
+`pip install`. Real entry point lives in paper_compiler_cli.cli:main.
 """
 
-import argparse
-import json
 import sys
 from pathlib import Path
 
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-def cmd_resolve(args: argparse.Namespace) -> int:
-    """Stage 1: Resolve input to canonical Semantic Scholar paper ID."""
-    print(json.dumps({
-        "_scaffold": True,
-        "input": args.input,
-        "candidates": [
-            {
-                "paper_id": "s2:TODO",
-                "title": "TODO: implement S2 resolution",
-                "year": None,
-                "confidence": 0.0,
-            }
-        ],
-        "next_step": "implement stage 1 from docs/04-architecture.md §3.1",
-    }, indent=2))
-    return 0
-
-
-def cmd_build(args: argparse.Namespace) -> int:
-    """Stages 2–9: acquire, parse, expand, classify, build graph, score, index, render."""
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "evidence").mkdir(exist_ok=True)
-
-    placeholder_md = f"""# Research Brief (SCAFFOLD)
-
-**This is a placeholder.** The real compile pipeline is not implemented yet.
-
-Paper ID requested: `{args.paper_id}`
-
-See docs/01-PRD.md §11 for the real research.md template and docs/04-architecture.md §3 for the build stages this command will eventually run.
-"""
-    (out / "research.md").write_text(placeholder_md)
-    (out / "missing-details.md").write_text("# Open implementation questions\n\n_None yet — scaffold mode._\n")
-    (out / "graph.json").write_text(json.dumps({
-        "schema_version": "1.0",
-        "compiled_at": "1970-01-01T00:00:00Z",
-        "target_paper_id": args.paper_id,
-        "papers": {},
-        "atoms": {},
-        "evidence": {},
-        "edges": {},
-        "missing_details": [],
-        "implementation_order": [],
-        "build_stats": {"_scaffold": True},
-    }, indent=2))
-    (out / "build-manifest.json").write_text(json.dumps({
-        "_scaffold": True,
-        "paper_id": args.paper_id,
-        "out_dir": str(out),
-        "stages_completed": [],
-        "failures": [],
-    }, indent=2))
-
-    print(f"Wrote placeholder research context to {out}/", file=sys.stderr)
-    return 0
-
-
-def cmd_cache(args: argparse.Namespace) -> int:
-    print("cache management not implemented yet")
-    return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(prog="paper-compiler")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    p_resolve = sub.add_parser("resolve", help="Resolve an input to a canonical paper ID.")
-    p_resolve.add_argument("input")
-    p_resolve.set_defaults(func=cmd_resolve)
-
-    p_build = sub.add_parser("build", help="Compile a paper into a research/ directory.")
-    p_build.add_argument("paper_id")
-    p_build.add_argument("--out", default="research", help="Output directory (default: research/)")
-    p_build.add_argument("--refresh", action="store_true", help="Invalidate cache for the target paper.")
-    p_build.set_defaults(func=cmd_build)
-
-    p_cache = sub.add_parser("cache", help="Cache management.")
-    p_cache.add_argument("action", choices=["prune", "info"])
-    p_cache.add_argument("--older-than", default="90d")
-    p_cache.set_defaults(func=cmd_cache)
-
-    args = parser.parse_args()
-    return args.func(args)
-
+from paper_compiler_cli.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())
