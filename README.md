@@ -262,7 +262,7 @@ The honest list. Fixed items from v1 are marked ✅. See `docs/v1_v2_delta_choke
 - **The PaperBench study from `docs/05` hasn't been run.** The hypothesis (Condition C beats A by ≥10pp) is unproven. This is the highest-impact open work.
 - **Domain neutrality is asserted, not verified.** The plugin is described as domain-neutral (ML, physics, chemistry, biology) but has only been validated on ML papers. The physic-simulo build (arxiv:2602.00658) is the first non-ML test, currently in progress.
 
-If any of these resonate, open an issue or get in touch (parijat.c@paradigmit.com). High-leverage near-term targets: OCR pre-screening, token-budget chunking, sentence-boundary-aware overlap, and the PaperBench evaluation harness.
+If any of these resonate, open an issue or get in touch (parijat690@gmail.com). High-leverage near-term targets: OCR pre-screening, token-budget chunking, sentence-boundary-aware overlap, and the PaperBench evaluation harness.
 
 ---
 
