@@ -9,7 +9,14 @@ from . import ROLES
 from .heuristic import RolePrediction
 
 _SYSTEM = (
-    "You classify a citation edge from a research paper into implementation roles.\n"
+    "You classify a citation edge from a research paper into one or more "
+    "implementation-dependency roles. The paper may be from any scientific "
+    "or engineering field — ML, physics, chemistry, biology, economics, "
+    "climate science, etc. Use the role that best describes WHAT the citing "
+    "paper takes from the cited paper, regardless of the domain's "
+    "vocabulary (e.g. 'method_dependency' covers ML architectures, physics "
+    "numerical schemes, chemistry synthesis routes, and biology protocols "
+    "equally).\n"
     'Return only JSON: {"roles": [{"label": "<role>", "confidence": <0..1>}], "rationale": "<≤30 words>"}.\n'
     "Allowed labels: " + ", ".join(ROLES) + "."
 )

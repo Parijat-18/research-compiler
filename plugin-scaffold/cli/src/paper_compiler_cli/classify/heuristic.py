@@ -4,20 +4,33 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from ..domain_patterns import (
+    ABLATION_HINTS,
+    ARCH_HINTS,
+    BASELINE_HINTS,
+    CONTRADICTS_HINTS,
+    DATASET_HINTS,
+    DOMAIN_TITLE_HINTS,
+    ENG_HINTS,
+    EVAL_HINTS,
+    LOSS_HINTS,
+    OPT_HINTS,
+    PREPROC_HINTS,
+    THEORY_HINTS,
+)
 from ..expand import NeighborPaper, RawEdge
 from ..ir import SectionType
 from . import ROLES
 
-ARCH_HINTS = ("architecture", "encoder", "decoder", "transformer", "attention", "backbone", "block", "module", "layer", "network")
-LOSS_HINTS = ("loss", "objective", "log-likelihood", "regulariz", "kl", "cross-entropy", "contrastive", "reward", "penalty")
-DATASET_HINTS = ("dataset", "corpus", "imagenet", "coco", "wikitext", "c4", "the pile", "common crawl", "benchmark", "split")
-PREPROC_HINTS = ("preprocess", "tokeniz", "augment", "normaliz", "patchif", "embed", "filter")
-EVAL_HINTS = ("evaluat", "metric", "benchmark", "score", "rouge", "bleu", "accuracy", "f1")
-BASELINE_HINTS = ("baseline", "we compare", "outperform", "against", "previous best")
-OPT_HINTS = ("adam", "sgd", "warmup", "schedule", "learning rate", "lr", "mixed precision", "ema", "weight decay")
-THEORY_HINTS = ("theorem", "lemma", "proof", "assumption", "convergence", "bound")
-ABLATION_HINTS = ("ablation", "we ablate", "removing")
-ENG_HINTS = ("pytorch", "tensorflow", "jax", "cuda", "flashattention", "deepspeed", "library", "framework", "implement")
+# Phase 4: a citation surrounded by negation/refutation tokens is a
+# candidate "contradicts" edge. The proximity (≤ ~50 chars) matters more
+# than the count of hits; we tally hits and also boost from explicit
+# negation tokens in the first 300 chars (where inline citations live).
+# This regex is domain-neutral — every field uses negation grammar.
+_NEG_PROXIMITY_RE = re.compile(
+    r"\b(?:not|no|without|fail(?:s|ed)?|cannot|refute[ds]?|unlike|contrary|differ(?:s|ed)?)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -37,52 +50,63 @@ def classify_heuristic(edge: RawEdge, neighbor: Optional[NeighborPaper] = None) 
 
     # section priors
     if section == "method":
-        for r in ("architecture_dependency", "loss_function_dependency", "preprocessing_dependency"):
+        for r in ("method_dependency", "objective_dependency", "preprocessing_dependency"):
             scores[r] += 0.4
     elif section == "experiments":
-        for r in ("dataset_dependency", "evaluation_protocol_dependency", "baseline_dependency"):
+        for r in ("data_dependency", "evaluation_dependency", "baseline_dependency"):
             scores[r] += 0.4
     elif section == "related_work":
         scores["related_work_only"] += 0.6
     elif section == "introduction":
         scores["related_work_only"] += 0.3
 
-    # text hints
-    scores["architecture_dependency"] += 0.15 * _hits(txt, ARCH_HINTS)
-    scores["loss_function_dependency"] += 0.2 * _hits(txt, LOSS_HINTS)
-    scores["dataset_dependency"] += 0.18 * _hits(txt, DATASET_HINTS)
+    # text hints. The keyword sets are deliberately broad-STEM (see
+    # domain_patterns.py) so a physics simulation paper or a chemistry
+    # methods paper isn't disadvantaged relative to ML. Users can swap
+    # in a domain-specific pack via cfg.domain.preset.
+    scores["method_dependency"] += 0.15 * _hits(txt, ARCH_HINTS)
+    scores["objective_dependency"] += 0.2 * _hits(txt, LOSS_HINTS)
+    scores["data_dependency"] += 0.18 * _hits(txt, DATASET_HINTS)
     scores["preprocessing_dependency"] += 0.18 * _hits(txt, PREPROC_HINTS)
-    scores["evaluation_protocol_dependency"] += 0.18 * _hits(txt, EVAL_HINTS)
+    scores["evaluation_dependency"] += 0.18 * _hits(txt, EVAL_HINTS)
     scores["baseline_dependency"] += 0.2 * _hits(txt, BASELINE_HINTS)
-    scores["optimizer_or_training_trick"] += 0.2 * _hits(txt, OPT_HINTS)
-    scores["theoretical_assumption"] += 0.2 * _hits(txt, THEORY_HINTS)
+    scores["procedure_dependency"] += 0.2 * _hits(txt, OPT_HINTS)
+    scores["theory_dependency"] += 0.2 * _hits(txt, THEORY_HINTS)
     scores["ablation_reference"] += 0.3 * _hits(txt, ABLATION_HINTS)
     scores["engineering_reference"] += 0.18 * _hits(txt, ENG_HINTS)
+    # Phase 4: contradicts. Hint count + a hard boost when a negation
+    # token appears in the citation's neighborhood (first 300 chars of
+    # context). The boost dominates because phrases like "unlike [3]" are
+    # very strong contradiction signals even at low hint counts.
+    scores["contradicts"] += 0.25 * _hits(txt, CONTRADICTS_HINTS)
+    if _NEG_PROXIMITY_RE.search(txt[:300]):
+        scores["contradicts"] += 0.35
 
-    # artifact proximity boosts
+    # artifact proximity boosts (domain-neutral: every field has equations,
+    # algorithms/pseudocode, and tables)
     if edge.nearby_equation_ids:
-        scores["loss_function_dependency"] += 0.25
-        scores["architecture_dependency"] += 0.15
-        scores["theoretical_assumption"] += 0.15
+        scores["objective_dependency"] += 0.25
+        scores["method_dependency"] += 0.15
+        scores["theory_dependency"] += 0.15
     if edge.nearby_algorithm_ids:
-        scores["architecture_dependency"] += 0.2
-        scores["optimizer_or_training_trick"] += 0.2
+        scores["method_dependency"] += 0.2
+        scores["procedure_dependency"] += 0.2
     if edge.nearby_table_ids:
         scores["baseline_dependency"] += 0.2
-        scores["evaluation_protocol_dependency"] += 0.2
+        scores["evaluation_dependency"] += 0.2
 
-    # title prior from cited paper
+    # title prior from cited paper. We keep this generic by relying on
+    # the domain pack (DOMAIN_TITLE_HINTS) rather than hardcoding ML
+    # vocabulary. Each entry says: "if any of these words appear in the
+    # cited paper's title, boost this role".
     if neighbor and neighbor.record:
         title = (neighbor.record.get("title") or "").lower()
-        if any(w in title for w in ("dataset", "corpus")):
-            scores["dataset_dependency"] += 0.3
-        if any(w in title for w in ("optimizer", "adam", "training")):
-            scores["optimizer_or_training_trick"] += 0.2
-        if any(w in title for w in ("transformer", "attention", "encoder")):
-            scores["architecture_dependency"] += 0.2
+        for role, hints in DOMAIN_TITLE_HINTS.items():
+            if any(w in title for w in hints):
+                scores[role] += 0.2
         types = neighbor.record.get("publicationTypes") or []
         if "Dataset" in types:
-            scores["dataset_dependency"] += 0.4
+            scores["data_dependency"] += 0.4
 
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     top = [(r, s) for r, s in ranked if s > 0]

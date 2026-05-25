@@ -28,8 +28,10 @@ def _safe(pid: str) -> str:
 
 
 def _atom_link(atom: Atom) -> str:
-    # atom.id is already "atom-001", don't double-prefix.
-    return f"[[{atom.id}|{atom.name}]]"
+    # Wikilink target is the content-stable uid so links survive rebuilds.
+    # Display is the human name; atom.id appears in the article body.
+    target = atom.uid or atom.id
+    return f"[[{target}|{atom.name}]]"
 
 
 def _paper_link(paper_id: str, papers: dict[str, dict]) -> str:
@@ -44,11 +46,12 @@ def render_atom_article(atom: Atom, papers: dict[str, dict], evidence_by_id: dic
     body: list[str] = []
     body.append(f"# {atom.name}\n")
     body.append(f"- **Category:** `{atom.category}`")
-    body.append(f"- **Atom ID:** `{atom.id}`")
+    body.append(f"- **Atom UID:** `{atom.uid}` (stable across rebuilds)")
+    body.append(f"- **Display ID:** `{atom.id}` (sequential, changes between compiles)")
     body.append(f"- **Defined by:** {_paper_link(atom.defined_by_paper_id, papers)}  · *{defining_title}*")
     body.append(f"- **Priority:** {atom.priority:.2f}")
     if atom.dependencies:
-        body.append("- **Depends on:** " + ", ".join(f"[[atom-{d}]]" for d in atom.dependencies))
+        body.append("- **Depends on:** " + ", ".join(f"[[{d}]]" for d in atom.dependencies))
     body.append("")
     body.append("## Description")
     body.append(atom.description or "_no description extracted_")
@@ -71,7 +74,7 @@ def render_atom_article(atom: Atom, papers: dict[str, dict], evidence_by_id: dic
         body.append("")
 
     body.append("## Query")
-    body.append(f"- `mcp__paper-compiler__get_evidence(atom_id=\"{atom.id}\")`")
+    body.append(f"- `mcp__paper-compiler__get_evidence(atom_id=\"{atom.id}\")` (or by `atom_uid=\"{atom.uid}\"`)")
     body.append(f"- `mcp__paper-compiler__find_atom(query=\"{atom.name[:60]}\")`")
     return "\n".join(body) + "\n"
 
@@ -221,8 +224,11 @@ def write_wiki(
 
     n = 0
     for a in atoms:
-        # a.id is already "atom-001"; the directory is "atoms/" so we just use the id.
-        path = wiki_dir / "atoms" / f"{a.id}.md"
+        # File name is the content-stable uid so wikilinks from wiki/answers/
+        # survive rebuilds. The display heading inside still shows the human
+        # atom_id ("atom-001").
+        target = a.uid or a.id
+        path = wiki_dir / "atoms" / f"{target}.md"
         path.write_text(render_atom_article(a, papers, evidence_by_id, related_by_id[a.id]))
         n += 1
     for pid, rec in papers.items():

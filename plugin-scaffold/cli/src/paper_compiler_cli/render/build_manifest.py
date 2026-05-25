@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..graph_db import SCHEMA_VERSION
 from ..ir import Paper
 
 
@@ -13,7 +14,11 @@ def write_manifest(path: Path, graph: dict[str, Any], target: Paper, started: fl
     n_resolved = stats.get("papers_resolved", 0)
     n_attempted = stats.get("papers_attempted", 0)
     coverage = (n_resolved / n_attempted) if n_attempted else 0.0
+    ev_total = stats.get("evidence_total", 0)
+    ev_resolved = stats.get("evidence_chunk_resolved", 0)
+    papers_by_source = stats.get("papers_by_source", {}) or {}
     manifest = {
+        "schema_version": SCHEMA_VERSION,
         "target_paper_id": target.paper_id,
         "title": target.metadata.title,
         "compiled_at": graph.get("compiled_at"),
@@ -30,6 +35,12 @@ def write_manifest(path: Path, graph: dict[str, Any], target: Paper, started: fl
             "edges": stats.get("edges", 0),
             "missing_details": len(graph.get("missing_details", [])),
         },
+        "evidence_provenance": {
+            "total": ev_total,
+            "chunk_id_resolved": ev_resolved,
+            "resolved_pct": round(100 * ev_resolved / ev_total, 1) if ev_total else 0.0,
+        },
+        "papers_by_source": dict(sorted(papers_by_source.items(), key=lambda kv: -kv[1])),
         "failures": [],
         "s2": {
             "requests": stats.get("s2_requests", 0),

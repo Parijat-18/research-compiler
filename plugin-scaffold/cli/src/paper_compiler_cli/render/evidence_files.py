@@ -13,6 +13,8 @@ def write_evidence_files(evidence_dir: Path, atoms: list[Atom], evidence: list[E
         lines = [
             f"# Evidence for `{atom.id}` — {atom.name}",
             "",
+            f"- **Atom UID:** `{atom.uid}` (stable across rebuilds)",
+            f"- **Display ID:** `{atom.id}` (sequential, may change)",
             f"- **Category:** {atom.category}",
             f"- **Defined by paper:** `{atom.defined_by_paper_id}`",
             f"- **Used by:** {', '.join(atom.used_by_paper_ids)}",
@@ -28,7 +30,12 @@ def write_evidence_files(evidence_dir: Path, atoms: list[Atom], evidence: list[E
             ev = ev_by_id.get(eid)
             if not ev:
                 continue
-            lines.append(f"### `{ev.id}` — paper `{ev.paper_id}` · section `{ev.section_id}` ({ev.section_type})")
+            loc_bits = [f"section `{ev.section_id}` ({ev.section_type})"]
+            if ev.paragraph_id:
+                loc_bits.append(f"paragraph `{ev.paragraph_id}`")
+            if ev.char_start is not None and ev.char_end is not None:
+                loc_bits.append(f"chars {ev.char_start}–{ev.char_end}")
+            lines.append(f"### `{ev.id}` — paper `{ev.paper_id}` · " + " · ".join(loc_bits))
             lines.append("")
             lines.append("> " + ev.verbatim_text.replace("\n", "\n> "))
             lines.append("")

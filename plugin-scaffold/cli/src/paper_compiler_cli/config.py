@@ -19,7 +19,38 @@ class S2Config:
 
 
 @dataclass
+class SourcesConfig:
+    """Multi-source acquisition (v1.0+).
+
+    The order of ``enabled`` is the trial order — earlier sources are tried
+    first. The first success wins and its ``source`` is recorded into
+    ``papers.acquired_via``.
+
+    ``contact_email`` is the "polite pool" identifier shared by OpenAlex,
+    Crossref and Unpaywall. Unpaywall *requires* it; the others reward it
+    with higher rate limits. We pass it as ``mailto=`` query param to
+    OpenAlex and ``email=`` to Unpaywall, and bake it into the User-Agent
+    for Crossref.
+    """
+
+    enabled: list[str] = field(
+        default_factory=lambda: ["arxiv", "s2", "openalex", "unpaywall", "crossref"]
+    )
+    contact_email: Optional[str] = None
+    rate_limit_rps: float = 2.0
+
+
+@dataclass
 class CompileConfig:
+    """User-tunable compile budgets and limits.
+
+    Phase 8: ``atom_paper_count`` removed — Phase 5's budget allocator
+    distributes LLM calls by edge weight across ALL parsed papers, so the
+    "top K cited papers only" knob no longer has a consumer. Existing
+    ``paper-compiler.toml`` files that still set it are silently ignored
+    by the loader (``_merge`` only writes recognized fields).
+    """
+
     max_depth: int = 2
     max_papers: int = 200
     max_s2_requests: int = 500
@@ -27,13 +58,14 @@ class CompileConfig:
     classifier_llm_max_calls: int = 50
     atom_llm_max_calls: int = 80
     expand_top_k: int = 20
-    atom_paper_count: int = 10
 
 
 @dataclass
 class ParserConfig:
     prefer: str = "tex"
-    pdf_backend: str = "marker"
+    # Default flipped to "docling" in v2.0 (10× faster, structured equations/tables).
+    # Set to "marker" for one-release legacy comparison; emits a deprecation warning.
+    pdf_backend: str = "docling"
 
 
 @dataclass
@@ -59,6 +91,7 @@ class LLMConfig:
 @dataclass
 class Config:
     s2: S2Config = field(default_factory=S2Config)
+    sources: SourcesConfig = field(default_factory=SourcesConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)
     parser: ParserConfig = field(default_factory=ParserConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -108,13 +141,16 @@ def load_config(explicit_path: Optional[Path] = None) -> Config:
             continue
         with open(p, "rb") as fh:
             raw = toml_lib.load(fh)
-        for key in ("s2", "compile", "parser", "output", "cache", "llm"):
+        for key in ("s2", "sources", "compile", "parser", "output", "cache", "llm"):
             if key in raw and isinstance(raw[key], dict):
                 _merge(getattr(cfg, key), raw[key])
         break
 
     cfg.s2.api_key = cfg.s2.api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
     cfg.llm.api_key = cfg.llm.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    cfg.sources.contact_email = (
+        cfg.sources.contact_email or os.environ.get("PAPER_COMPILER_CONTACT_EMAIL")
+    )
     return cfg
 
 

@@ -22,7 +22,9 @@ understand the foreign-key graph.
 - The graph is **bidirectional through `edges`**: an edge from A to B doesn't
   imply a row from B to A. Query both directions in `paper_id` traversals.
 - Atoms are the **unit of implementation**. Use them whenever Claude is about
-  to write code that involves a specific architecture, loss, dataset, etc.
+  to write code that involves a specific component of the paper — a method,
+  objective, dataset, procedure, parameter, etc. The plugin is domain-neutral:
+  the same categories work for ML, physics, chemistry, biology, etc.
 
 ## Core tables
 
@@ -71,7 +73,7 @@ Virtual table over `chunks.text + paper_title + atoms_mentioned`. Query with `MA
 ```sql
 SELECT chunks.chunk_id, chunks.paper_id, chunks.text
 FROM chunks_fts JOIN chunks ON chunks.chunk_id = chunks_fts.rowid
-WHERE chunks_fts MATCH 'contrastive AND loss'
+WHERE chunks_fts MATCH 'objective AND function'  -- or any field-appropriate keywords
 ORDER BY bm25(chunks_fts) LIMIT 10;
 ```
 
@@ -88,9 +90,10 @@ ORDER BY distance;
 ### `atoms`
 | col | type | notes |
 |---|---|---|
-| atom_id | TEXT PK | `atom-<NNN>` |
+| atom_id | TEXT PK | `atom-<NNN>` — sequential, **changes between compiles** |
+| atom_uid | TEXT UNIQUE | content-stable id (`sha1(category, canonical_name, defining_paper_id)[:16]`) — **survives rebuilds**; use this for cross-compile references |
 | name | TEXT | |
-| category | TEXT | architecture\\|loss\\|dataset\\|preprocessing\\|evaluation\\|baseline\\|optimizer\\|hyperparameter\\|training_trick |
+| category | TEXT | method\\|objective\\|data\\|preprocessing\\|evaluation\\|baseline\\|procedure\\|parameter\\|theory (domain-neutral; ML *architecture* → method, ML *loss* → objective, ML *optimizer* → procedure, ML *hyperparameter* → parameter, etc.) |
 | defined_by_paper_id | FK | usually the target; sometimes a cited paper |
 | description | TEXT | one-sentence summary |
 | priority | REAL | implementation priority 0..1 |
@@ -102,7 +105,14 @@ Same shape as `chunks_*` but over atom name + description.
 Many-to-many: which papers use which atom. `role` is `uses` (default) or `defines`.
 
 ### `atom_evidence`
-| evidence_id | atom_id | chunk_id (nullable) | verbatim_text |
+| col | type | notes |
+|---|---|---|
+| evidence_id | TEXT PK | `ev-<NNN>` |
+| atom_id | FK | |
+| chunk_id | FK | source chunk in `chunks` — **populated** in v2 (was always NULL in v1) |
+| paragraph_id | TEXT | source paragraph anchor (same value as `chunks.paragraph_id`) |
+| char_start, char_end | INTEGER | offsets within the verbatim span |
+| verbatim_text | TEXT | the exact quoted text |
 
 ### `edges`
 Citation edges between papers, classified by implementation role.
@@ -117,9 +127,19 @@ Citation edges between papers, classified by implementation role.
 | paragraph_id | TEXT | |
 | classifier | TEXT | `heuristic` or `llm` |
 | context | TEXT | surrounding paragraph text |
+| provenance_rule | TEXT | which rule created this edge (`s2_cited_by`, `bib_resolve`, `inline_cite_match`, `atom_coref`, `llm_judgment`) — populated by Phase 4 |
+| citation_intent | TEXT | `background`, `method`, `result`, `extends`, `contrasts`, `mention` — from SciCite-style intent classifier (Phase 4) |
+| intent_confidence | REAL | classifier confidence for `citation_intent` |
+| weight | REAL | combined edge weight: `best_confidence × intent_weight × role_weight` (Phase 4) |
 
 ### `edge_roles`
 Multi-label: each `edge_id` may have multiple `(label, confidence)` rows.
+
+### `edge_intents`
+Multi-label citation intents (a single citation often plays multiple roles, e.g. method + result). Populated by Phase 4.
+
+### `wiki_answers`
+Survives across rebuilds. Phase 8 ingests `research/wiki/answers/*.md` into this table and embeds the body back into `chunks_vec` (with `paper_id=NULL`, `chunk_kind="answer"`) so promoted answers are retrievable via `query_chunks`.
 
 ### `equations`
 | equation_id | paper_id | section_id | latex |
@@ -134,7 +154,7 @@ LLM-summarized clusters from greedy modularity over the paper graph.
 Open implementation questions the compiler couldn't resolve.
 
 ### `meta`
-Key-value store. Useful keys: `target_paper_id`, `schema_version`, `compiled_at`.
+Key-value store. Useful keys: `target_paper_id`, `schema_version` (`"2.0"` in this artifact), `compiled_at`.
 
 ## Common query patterns
 
@@ -153,7 +173,7 @@ ORDER BY bm25(chunks_fts) LIMIT 10;
 SELECT a.atom_id, a.name, a.category, p.title AS defining_paper
 FROM atoms a
 JOIN papers p ON p.paper_id = a.defined_by_paper_id
-WHERE a.category = 'loss'
+WHERE a.category = 'objective'   -- or 'method' / 'data' / 'procedure' / ...
 ORDER BY a.priority DESC;
 ```
 
@@ -162,7 +182,7 @@ ORDER BY a.priority DESC;
 SELECT e.to_paper_id, p.title, e.best_role, e.best_confidence
 FROM edges e JOIN papers p ON p.paper_id = e.to_paper_id
 WHERE e.from_paper_id = (SELECT value FROM meta WHERE key = 'target_paper_id')
-  AND e.best_role = 'architecture_dependency'
+  AND e.best_role = 'method_dependency'  -- or 'objective_dependency' / ...
 ORDER BY e.best_confidence DESC;
 ```
 

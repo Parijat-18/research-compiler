@@ -61,17 +61,18 @@ def is_method_adjacent_title(title: str | None) -> bool:
 def prose_quality(text: str) -> float:
     """Return a 0..1 score for "looks like English prose" vs table/equation noise.
 
-    Heuristics, in priority order:
-      1. Letter density (`[A-Za-z]` / total len). High prose ≥ 0.65.
-      2. Average word length and word count. Real paragraphs have ≥ 25 words.
-      3. Punctuation rate. Table rows tend to be `|`-, `-`-, `&`-heavy.
-      4. Numeric density. >25% digits + dots is almost always tabular.
+    Phase 6: returns a soft score in [0.05, 1.0] for any non-empty text. The
+    previous hard-fail thresholds (60% chunk dropout in the JEPA audit) are
+    gone — every chunk gets indexed and retrieval uses ``chunk_kind`` + a
+    quality weight to rank, not to drop. Tables/captions/references are NOT
+    judged by this prose-prior function; they receive default quality scores
+    keyed off ``chunk_kind`` in ``classify_chunk_kind``.
     """
     if not text:
         return 0.0
     n = len(text)
-    if n < 60:
-        return 0.0
+    if n < 20:
+        return 0.05
     letters = sum(1 for c in text if c.isalpha())
     digits = sum(1 for c in text if c.isdigit())
     punct_table = sum(1 for c in text if c in "|&\\")
@@ -82,37 +83,91 @@ def prose_quality(text: str) -> float:
     word_count = len(words)
     avg_word_len = sum(len(w) for w in words) / max(word_count, 1)
 
-    # Hard fails — these never pass.
-    if letter_ratio < 0.5:
-        return 0.0
-    if digit_ratio > 0.25:
-        return 0.0
-    if table_punct_ratio > 0.04:
-        return 0.0
-    if word_count < 20:
-        return 0.0
-    if avg_word_len > 12 or avg_word_len < 3:
-        # Avg too high → likely glued-up tokens / formulas. Too low → punctuation row.
-        return 0.0
+    # Soft scoring: lower scores for tabular / numeric / very-short text, but
+    # we never zero anything out — retrieval is allowed to find low-prose
+    # chunks when the user explicitly asks for tables / numerics via
+    # ``prefer_kind`` or when the query itself is keyword-precise.
+    score = 0.5 * min(1.0, (letter_ratio - 0.3) / 0.4)
+    score += 0.3 * min(1.0, word_count / 100.0)
+    score += 0.2 * (1.0 - min(1.0, digit_ratio / 0.5))
+    score -= 0.4 * min(1.0, table_punct_ratio / 0.05)
+    if avg_word_len > 14 or avg_word_len < 2.5:
+        score -= 0.2
+    return round(min(1.0, max(0.05, score)), 3)
 
-    # Softer scoring on top.
-    score = 0.5 * min(1.0, (letter_ratio - 0.5) / 0.4) + 0.3 * min(1.0, word_count / 100.0)
-    score += 0.2 * (1.0 - min(1.0, digit_ratio / 0.25))
-    return round(min(1.0, max(0.0, score)), 3)
+
+# Phase 6: chunk taxonomy. Recorded on each row so retrieval can filter
+# (e.g. ``query_chunks(kinds=["table"])``) or boost via ``prefer_kind``.
+CHUNK_KINDS = (
+    "prose",          # body paragraph of text
+    "table",          # table caption + serialized rows (if available)
+    "caption",        # figure caption (no body text)
+    "reference",      # bibliography entry
+    "equation_block", # display equation or block with $$...$$
+    "answer",         # promoted wiki/answers/* content (Phase 8)
+)
+
+# Default quality assignments for non-prose kinds. Prose chunks use
+# prose_quality() directly. The numbers below are intentionally mid-range:
+# they're floors, not penalties, so a table or caption can still surface
+# when the BM25/dense score is high.
+_DEFAULT_QUALITY_BY_KIND = {
+    "table": 0.55,
+    "caption": 0.45,
+    "reference": 0.30,
+    "equation_block": 0.50,
+    "answer": 0.80,  # promoted answers are high-signal by construction
+}
+
+# Patterns that flip a paragraph chunk away from "prose" without the
+# parser having to tell us. Cheap; lets us catch reference list items and
+# bare equation blocks that slip through as paragraphs.
+_EQUATION_BLOCK_RE = re.compile(r"\$\$.+?\$\$|\\begin\{(equation|align|gather)\*?\}", re.DOTALL)
+_REF_ENTRY_RE = re.compile(r"^\s*\[\d{1,3}\]\s+\S")
+
+
+def classify_chunk_kind(
+    section_type: str | None,
+    section_title: str | None,
+    text: str,
+    *,
+    override_kind: str | None = None,
+) -> tuple[str, float]:
+    """Return ``(chunk_kind, quality)`` for a piece of indexable text.
+
+    Callers ingesting structured items (tables, figures, equations) pass
+    ``override_kind`` so the heuristics below stay focused on body
+    paragraphs. The quality for override kinds comes from
+    ``_DEFAULT_QUALITY_BY_KIND``; for prose it comes from
+    ``prose_quality(text)``.
+    """
+    if override_kind:
+        return override_kind, _DEFAULT_QUALITY_BY_KIND.get(override_kind, 0.5)
+
+    # Reference list entries (numeric-marker prefix).
+    title_low = (section_title or "").lower()
+    if "reference" in title_low or "bibliograph" in title_low:
+        return "reference", _DEFAULT_QUALITY_BY_KIND["reference"]
+    if _REF_ENTRY_RE.match(text or ""):
+        return "reference", _DEFAULT_QUALITY_BY_KIND["reference"]
+
+    # Display equation paragraphs that the parser left in the body stream.
+    if text and _EQUATION_BLOCK_RE.search(text):
+        return "equation_block", _DEFAULT_QUALITY_BY_KIND["equation_block"]
+
+    # Everything else is prose; quality from the soft prior.
+    return "prose", prose_quality(text or "")
 
 
 def is_indexable(section_type: str | None, section_title: str | None, text: str) -> tuple[bool, float]:
-    """Decide whether a chunk should be inserted into ``chunks_fts``.
+    """Deprecated v0.2 entrypoint. Phase 6 indexes every chunk.
 
-    Returns (is_indexed, quality_score). Even non-indexed chunks are stored in
-    `chunks` for traceability via ``chunk_id`` — they just don't appear in
-    text search.
+    Returns ``(True, quality)`` so callers that haven't been migrated to
+    ``classify_chunk_kind`` still record a sensible quality score and keep
+    indexing. ``is_indexed`` stays in the schema for one release and
+    defaults to 1 (Phase 8 drops it).
     """
-    quality = prose_quality(text)
-    if quality == 0.0:
-        return False, 0.0
-    if section_type in (None, "appendix", "other") and not is_method_adjacent_title(section_title):
-        return False, quality
+    _, quality = classify_chunk_kind(section_type, section_title, text)
     return True, quality
 
 

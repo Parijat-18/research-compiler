@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "research-compiler-local",
+  "description": "Local marketplace for the research-compiler / paper-compiler plugin. Installs from the working copy at ./plugin-scaffold.",
+  "owner": {
+    "name": "Parijat Chatterjee",
+    "email": "parijat690@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "paper-compiler",
+      "description": "Compile a research paper and its citation neighborhood into an implementation-ready memory for Claude Code. Domain-neutral; MCP-first; nested sub-skills; cross-session memory.",
+      "author": {
+        "name": "Parijat Chatterjee"
+      },
+      "category": "research",
+      "source": "./plugin-scaffold",
+      "homepage": "https://github.com/Parijat-18/paper-compiler"
+    }
+  ]
+}

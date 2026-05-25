@@ -29,13 +29,14 @@ if [[ -z "$file_path" || ! -f "$file_path" ]]; then
   exit 0
 fi
 
-md_path="research/missing-details.md"
+md_path="${CLAUDE_PROJECT_DIR:-$(pwd)}/research/missing-details.md"
 if [[ ! -f "$md_path" ]]; then
   exit 0
 fi
 
 # Strip headings + bullet prefixes, pull notable lowercase words ≥5 chars.
-mapfile -t keywords < <(
+keywords=()
+while IFS= read -r line; do keywords+=("$line"); done < <(
   grep -E '^(##|- |\*\*)' "$md_path" 2>/dev/null \
     | tr '[:upper:]' '[:lower:]' \
     | grep -oE '[a-z][a-z_-]{4,}' \

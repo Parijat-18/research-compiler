@@ -1,13 +1,21 @@
 {
   "name": "paper-compiler",
-  "description": "Compile a research paper and its citation neighborhood into an implementation-ready memory for Claude Code.",
-  "version": "0.1.0",
+  "version": "2.0.0",
+  "description": "Compile a research paper and its citation neighborhood into an implementation-ready memory for Claude Code. Domain-neutral (ML, physics, chemistry, biology). MCP-first; hard policy enforcement; nested sub-skill architecture; cross-session memory via decisions.md + sessions/.",
   "author": {
-    "name": "Parijat Chaudhuri",
-    "email": "parijat.c@paradigmit.com"
+    "name": "Parijat Chatterjee",
+    "email": "parijat690@gmail.com"
   },
   "homepage": "https://github.com/Parijat-18/paper-compiler",
   "repository": "https://github.com/Parijat-18/paper-compiler",
   "license": "MIT",
-  "keywords": ["research", "papers", "reproducibility", "rag", "mcp", "semantic-scholar"]
+  "keywords": [
+    "research",
+    "papers",
+    "reproducibility",
+    "graphrag",
+    "mcp",
+    "semantic-scholar",
+    "openalex"
+  ]
 }

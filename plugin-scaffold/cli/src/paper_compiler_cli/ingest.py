@@ -46,6 +46,17 @@ async def ingest_paper_into_research(cfg: Config, raw_input: str, research_dir: 
         print(f"error: {db_path} missing — run `paper-compiler build` first", file=sys.stderr)
         return 2
 
+    # v2.0 memory layer: ensure sessions/ + decisions.md exist on every ingest
+    # so the Stop hook + record_decision tool can write without checking.
+    (research_dir / "sessions").mkdir(exist_ok=True)
+    decisions_path = research_dir / "decisions.md"
+    if not decisions_path.exists():
+        decisions_path.write_text(
+            "# Decisions & Gotchas\n\n"
+            "Append-only. Written by `mcp__paper-compiler__record_decision`.\n",
+            encoding="utf-8",
+        )
+
     candidates = await resolve(cfg, raw_input)
     if not candidates:
         print(f"resolve failed for {raw_input!r}", file=sys.stderr)
@@ -112,6 +123,14 @@ async def ingest_paper_into_research(cfg: Config, raw_input: str, research_dir: 
         except Exception as e:  # noqa: BLE001
             print(f"embedding refresh failed: {e}", file=sys.stderr)
 
+    # Phase 8: re-embed wiki answers from disk so they survive the delta
+    # ingest (the answers dir might have been edited since last compile).
+    try:
+        from .wiki_ingest import reembed_wiki_answers
+        reembed_wiki_answers(conn, research_dir, vec_loaded=vec_loaded)
+    except Exception as e:  # noqa: BLE001
+        print(f"wiki re-embed skipped: {e}", file=sys.stderr)
+
     # Recluster communities from the full DB graph.
     all_atoms = _load_atoms_from_db(conn)
     paper_records = _load_paper_records_from_db(conn)
@@ -149,14 +168,16 @@ def _load_atoms_from_db(conn) -> list:
     from .atoms import Atom
 
     out: list[Atom] = []
-    for r in conn.execute("SELECT atom_id, name, category, defined_by_paper_id, description, priority FROM atoms"):
+    for r in conn.execute("SELECT atom_id, atom_uid, name, category, subcategory, defined_by_paper_id, description, priority FROM atoms"):
         used_by = [u["paper_id"] for u in conn.execute("SELECT paper_id FROM atom_paper_usage WHERE atom_id = ?", (r["atom_id"],))]
         ev_ids = [u["evidence_id"] for u in conn.execute("SELECT evidence_id FROM atom_evidence WHERE atom_id = ?", (r["atom_id"],))]
         out.append(
             Atom(
                 id=r["atom_id"],
+                uid=r["atom_uid"] or "",
                 name=r["name"],
                 category=r["category"],
+                subcategory=r["subcategory"],
                 defined_by_paper_id=r["defined_by_paper_id"],
                 used_by_paper_ids=used_by or [r["defined_by_paper_id"]],
                 description=r["description"] or "",
@@ -171,13 +192,24 @@ def _load_evidence_from_db(conn) -> list:
     from .atoms import EvidenceSpan
 
     out: list[EvidenceSpan] = []
-    for r in conn.execute("SELECT evidence_id, atom_id, verbatim_text FROM atom_evidence"):
+    for r in conn.execute(
+        """
+        SELECT ae.evidence_id, ae.atom_id, ae.verbatim_text, ae.paragraph_id,
+               ae.char_start, ae.char_end, c.paper_id, c.section_id, s.section_type
+        FROM atom_evidence ae
+        LEFT JOIN chunks c ON c.chunk_id = ae.chunk_id
+        LEFT JOIN sections s ON s.section_id = c.section_id
+        """
+    ):
         out.append(
             EvidenceSpan(
                 id=r["evidence_id"],
-                paper_id="",
-                section_id=None,
-                section_type="other",
+                paper_id=r["paper_id"] or "",
+                section_id=r["section_id"],
+                section_type=r["section_type"] or "other",
+                paragraph_id=r["paragraph_id"],
+                char_start=r["char_start"],
+                char_end=r["char_end"],
                 verbatim_text=r["verbatim_text"] or "",
                 supports_atom_ids=[r["atom_id"]],
             )

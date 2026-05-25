@@ -1,70 +1,48 @@
 ---
 name: audit-against-research
-description: Cross-check the repo against the compiled paper-compiler context and flag missing / divergent / partial implementations. Use when finishing a paper implementation, reviewing a PR derived from a paper, or when the user explicitly asks "audit my code against the paper", "is this faithful to <paper>?", "check my reproduction". Produces `audit-report.md` with per-atom verdicts. Warn-only — never auto-fixes.
-when_to_use: Activates when research/ exists and the user is reviewing, finishing, or PR-prepping paper-derived code.
-paths:
-  - research/research.md
-  - src/**/*.py
-  - "**/*.py"
-  - "**/*.ipynb"
+description: Cross-check the repo against the compiled paper-compiler context. Domain-neutral — works on ML reproductions, physics simulations, chemistry pipelines, biology protocols. Dispatches per-category audit sub-skills (audit-method / audit-objective / audit-data / audit-procedure / audit-evaluation / audit-baseline / audit-theory). Warn-only — never auto-fixes.
+when_to_use: Activates when research/ exists and the user is reviewing, finishing, or PR-prepping paper-derived code, regardless of field.
 allowed-tools:
+  - Bash
   - Read
-  - Grep
-  - Glob
-  - mcp__paper-compiler__paper_summary
-  - mcp__paper-compiler__trace_dependency
-  - mcp__paper-compiler__find_atom
-  - mcp__paper-compiler__get_evidence
-  - mcp__paper-compiler__list_missing_details
+  - Write
+  - mcp__paper-compiler__get_paper_context
   - mcp__paper-compiler__graph_stats
-  - mcp__paper-compiler__neighborhood_subgraph
-  - mcp__paper-compiler__graph_sql
+  - mcp__paper-compiler__trace_dependency
+  - mcp__paper-compiler__list_missing_details
 ---
 
-# audit-against-research
+# audit-against-research — router
 
-Verdict per atom. Short, structured, unhedged. See
-`references/audit-checklist.md` for the per-category audit recipes.
+Cross-check the repo against the compiled context. Each atom category has its own audit sub-skill with a tight tool whitelist. Per-atom verdicts: `IMPLEMENTED` / `PARTIAL` / `MISSING` / `DIVERGENT`.
 
 ## Procedure
 
-1. Read `research/research.md`.
-2. List required atoms via `graph_stats()` + the four traces (architecture,
-   loss, dataset, evaluation). Cap at top 25 by `priority`.
-3. For each atom, run the category-specific audit from
-   `references/audit-checklist.md` and score: `IMPLEMENTED` / `PARTIAL` /
-   `MISSING` / `DIVERGENT`.
-4. Cross-check `list_missing_details()`: every open assumption must show as a
-   visible choice in the code (comment, config value, named variable).
-5. Write `audit-report.md` using the template below.
+1. **Load structured context** via MCP — do **not** Read `research/research.md` directly:
+   ```
+   mcp__paper-compiler__get_paper_context()
+   mcp__paper-compiler__graph_stats()
+   ```
 
-## Audit report template
+2. **Enumerate required atoms.** For each category present (skip categories the paper doesn't use — a pure theory paper has no `procedure` atoms):
+   - `mcp__paper-compiler__trace_dependency(component=<category>)` returns the ranked atoms.
+   - Cap at top 25 by `priority`.
 
-```
-Paper: <title>  (<atom_count> required atoms)
+3. **Run the per-category audit sub-skill** for each category present:
+   - `audit-method` — algorithmic/structural unit
+   - `audit-objective` — loss / Hamiltonian / yield / fitness
+   - `audit-data` — datasets + preprocessing
+   - `audit-procedure` — training loop / integrator / experimental procedure + parameters
+   - `audit-evaluation` — metrics & statistical tests
+   - `audit-baseline` — published comparisons
+   - `audit-theory` — theorems / assumptions / principles
 
-| Status      | Count |
-| :---------- | ----: |
-| Implemented |   ... |
-| Partial     |   ... |
-| Missing     |   ... |
-| Divergent   |   ... |
+4. **Cross-check open assumptions.** `mcp__paper-compiler__list_missing_details()`. Every open assumption must show as a visible choice in the code — comment, named config value, or TODO.
 
-## Findings
-- [MISSING]   atom-NNN <name>: <one-line gap, file ref if relevant>
-- [DIVERGENT] atom-NNN <name>: code says <X>, brief says <Y> (chunk_id=N)
-- [PARTIAL]   atom-NNN <name>: <what's there, what's not>
-
-## Unflagged assumptions
-- md-NNN: <one-liner>
-
-## Recommended next steps
-1. ...
-```
+5. **Write `audit-report.md`** at the repo root using the template at `references/audit-report-template.md`.
 
 ## Rules
 
-- Only flag DIVERGENT with evidence (cite chunk_id or atom_id). Stylistic
-  disagreement is not divergence.
+- Flag `DIVERGENT` only with evidence — cite `atom_uid` (stable across rebuilds) + `chunk_id` + `paper_id`. Stylistic disagreement is not divergence.
 - Do not auto-fix. The user decides.
-- Keep the report short — Claude reads it next session.
+- Keep the report short — the user reads it next session.

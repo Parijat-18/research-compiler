@@ -1,73 +1,51 @@
 ---
 name: use-research-context
-description: Use when implementing, porting, reproducing, modifying, extending, or debugging code from a research paper that has been compiled into `research/` by paper-compiler. Trigger phrases — "implement this paper", "port the architecture from X", "reproduce the loss / training / eval", "match the baseline", "fix mismatch with the paper", "add this baseline". Consults the compiled brief + Graph RAG DB + wiki before generating code, follows the per-component playbooks in `references/`, and cites evidence inline.
-when_to_use: Activates when the repo contains `research/research.md` and the user is doing implementation work originating from a paper. If only one is true, suggest /paper-compiler:build-research-context.
-paths:
-  - research/research.md
-  - research/research.db
-  - research/wiki/**/*.md
+description: Implementation work derived from a compiled paper. Domain-neutral — ML, physics, chemistry, biology, economics, climate, etc. Routes to a category-specific sub-skill (implement-method / implement-objective / implement-data / implement-procedure / implement-evaluation / implement-baseline / debug-divergence) via `scripts/select-playbook.sh`.
+when_to_use: Activates when the repo contains `research/research.md` and the user is doing implementation work originating from a paper, regardless of field.
 allowed-tools:
-  - Read
-  - Glob
-  - mcp__paper-compiler__paper_summary
-  - mcp__paper-compiler__trace_dependency
-  - mcp__paper-compiler__find_atom
-  - mcp__paper-compiler__get_evidence
+  - Bash
+  - mcp__paper-compiler__get_paper_context
+  - mcp__paper-compiler__list_sessions
   - mcp__paper-compiler__list_missing_details
-  - mcp__paper-compiler__equation_lookup
-  - mcp__paper-compiler__compare_methods
-  - mcp__paper-compiler__citation_neighbors
-  - mcp__paper-compiler__graph_stats
-  - mcp__paper-compiler__query_chunks
-  - mcp__paper-compiler__paper_text
-  - mcp__paper-compiler__community_summary
-  - mcp__paper-compiler__list_communities
-  - mcp__paper-compiler__neighborhood_subgraph
-  - mcp__paper-compiler__shortest_path
-  - mcp__paper-compiler__graph_sql
-  - mcp__paper-compiler__schema_doc
+  - mcp__paper-compiler__route_query_only
 ---
 
-# use-research-context
+# use-research-context — router
 
-Implementation work that comes from a compiled paper. Cite every non-obvious
-choice; never invent paper-specific details from memory.
+This is a **dispatcher**, not an implementation skill. Each atom category has its own sub-skill with a tight tool whitelist and a `context: fork` policy island. Pick the right sub-skill and hand off.
 
 ## Procedure
 
-1. **Read** `research/research.md`.
-2. **Pick the playbook** that matches the implementation task and follow it:
-   - Architecture component (encoder / decoder / block / attention) →
-     `references/implementing-architecture.md`.
-   - Loss / objective → `references/implementing-loss.md`.
-   - Dataset / preprocessing / data pipeline →
-     `references/implementing-dataset.md`.
-   - Optimizer / scheduler / training trick → see the loss playbook
-     (same MCP pattern; different atom category).
-   - Evaluation protocol / metric → `references/implementing-eval.md`.
-   - Baseline → `references/implementing-baseline.md`.
-   - The code disagrees with the paper / something is missing →
-     `references/debugging-mismatch.md`.
-3. **Token discipline.** Default to snippet responses (`query_chunks` returns
-   240-char snippets unless you pass `full=True`). Only ask for full text after
-   you know which chunk_ids matter.
-4. **Cite.** In code comments: `# per atom-013 — research/wiki/atoms/atom-013.md`.
-5. **Surface assumptions.** When `list_missing_details()` lists the detail
-   you need, make a visible choice and add a TODO at the end of your response.
+1. **Load the structured paper context** via the MCP tool — do **not** Read `research/research.md` directly:
+   ```
+   mcp__paper-compiler__get_paper_context()
+   ```
+   Returns paper title + id, atom counts by category, top-priority atoms, top communities, open `missing_details` count, recent session count, recent decisions count. This is the only one-call summary you should need before dispatching.
 
-## Rules
+2. **Check for resumable work.** `mcp__paper-compiler__list_sessions(limit=3)`. If a recent session exists and the user's prompt hints at continuation ("where were we", "continue", "next step"), invoke `/paper-compiler:use-research-context continue` (sub-skill) before doing anything else.
 
-- The compiled DB + wiki replace web search for any paper-specific fact. Do
-  not search the web for details that should be in the corpus.
-- Trust the brief and DB over the raw PDF.
-- Do not paraphrase `research.md` back to the user — it's already in context.
-- Never hand-edit `research/research.md`, `research.db`, or generated wiki
-  articles. Use the CLI / skills.
+3. **Dispatch by atom category.** Either the user named a category (loss / encoder / dataset / optimizer / evaluation / baseline), or you can infer one from their prompt. Run the dispatcher:
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/scripts/select-playbook.sh "<user phrase>"
+   ```
+   Output format: `<category> <sub-skill> <slash-command-path>`.
 
-## See also
+   Then invoke the named sub-skill. Each sub-skill picks up with its own forked context.
 
-- `research/SCHEMA.md` — DB tables and columns (read once per session if you
-  plan to use `graph_sql`).
-- `research/wiki/SCHEMA.md` — article shapes.
-- `/paper-compiler:wiki-query` for open-ended questions about the corpus.
-- `/paper-compiler:audit-against-research` after you finish implementing.
+4. **Sub-skills available:**
+   - `implement-method` — algorithmic/structural unit (ML architecture, physics scheme, chem route, bio protocol)
+   - `implement-objective` — loss/Hamiltonian/yield/fitness function
+   - `implement-data` — dataset/measurements + preprocessing
+   - `implement-procedure` — optimizer/integrator/protocol + parameters
+   - `implement-evaluation` — metrics/diagnostics/statistical tests
+   - `implement-baseline` — published comparison method
+   - `debug-divergence` — when implementation disagrees with paper
+   - `continue` — resume mid-implementation (Phase D)
+   - `port` — port to a different repo (Phase D)
+
+## Hard rules (enforced by `.claude/settings.json` deny patterns)
+
+- **Do not** `Read` / `Glob` / `Grep` `research/wiki/atoms/`, `research/wiki/papers/`, `research/wiki/communities/`, `research/evidence/`, `research/graph.json`, `research/research.db`. Use the MCP tools — they return structured snippets and are autoApproved.
+- `research/research.md` is allowed but unnecessary — `get_paper_context()` gives you the same structured information in less context.
+- Cite `atom_uid` (the v1.0 stable id) in code comments, not the sequential `atom_id` (resh­uffles on rebuild).
+- Significant choices and gotchas → `record_decision(...)` (requires user approval; lands in `research/decisions.md` and is visible to future sessions).

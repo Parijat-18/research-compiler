@@ -40,7 +40,10 @@ class ExternalIds(BaseModel):
 
 
 class Acquisition(BaseModel):
-    source: Literal["arxiv_tex", "s2_pdf", "local_pdf", "local_tex", "unavailable"]
+    # Open-ended in v1.0: any source name registered in ``sources/`` may
+    # appear here (e.g. ``openalex_pdf``, ``unpaywall_pdf``, ``crossref_pdf``).
+    # The closed Literal of v0.2 was too narrow once the registry landed.
+    source: str
     fetched_at: str
     cache_path: Optional[str] = None
 

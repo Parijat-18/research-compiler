@@ -20,13 +20,18 @@ except Exception:  # noqa: BLE001
 
 
 CATEGORY_HEADINGS = (
-    ("dataset", "Datasets"),
+    # Domain-neutral. Each heading shows in any paper's brief regardless
+    # of field; an ML paper, a physics simulation paper, and a chemistry
+    # methods paper all use the same skeleton.
+    ("data", "Data / measurements"),
     ("preprocessing", "Preprocessing"),
-    ("architecture", "Architecture"),
-    ("loss", "Loss / objective"),
-    ("optimizer", "Optimizer / training tricks"),
-    ("evaluation", "Evaluation protocol"),
+    ("method", "Method / algorithm"),
+    ("objective", "Objective / function being optimized or measured"),
+    ("procedure", "Procedure (training / simulation / experimental protocol)"),
+    ("parameter", "Parameters / settings"),
+    ("evaluation", "Evaluation"),
     ("baseline", "Baselines"),
+    ("theory", "Theoretical assumptions / theorems"),
 )
 
 
@@ -77,7 +82,7 @@ def render_research_md(
     parts.append(f"- S2 paper ID: `{target.paper_id}`\n")
 
     parts.append("## What we're implementing\n")
-    parts.append("Method components below are extracted from the paper's Method section and linked to defining papers in the citation neighborhood. Query the MCP server for any specific decision.\n")
+    parts.append("Components below are extracted from the paper's method/procedure sections and linked to defining papers in the citation neighborhood. The plugin is domain-neutral — categories cover ML, physics, chemistry, biology, and any field with implementable methods. Query the MCP server for any specific decision.\n")
 
     parts.append("## Implementation atoms\n")
     by_cat: dict[str, list[Atom]] = {}
@@ -99,11 +104,13 @@ def render_research_md(
     parts.append("")
 
     parts.append("## Where to query the graph instead of guessing\n")
-    parts.append("- Architecture: `mcp__paper-compiler__trace_dependency` component=architecture")
-    parts.append("- Loss: `trace_dependency` component=loss")
-    parts.append("- Dataset / preprocessing: `trace_dependency` component=dataset|preprocessing")
+    parts.append("- Method / algorithm: `mcp__paper-compiler__trace_dependency` component=method")
+    parts.append("- Objective: `trace_dependency` component=objective")
+    parts.append("- Data / preprocessing: `trace_dependency` component=data|preprocessing")
+    parts.append("- Procedure (training / simulation / protocol): `trace_dependency` component=procedure")
     parts.append("- Evaluation: `trace_dependency` component=evaluation")
     parts.append("- Baselines: `trace_dependency` component=baseline")
+    parts.append("- Theory: `trace_dependency` component=theory")
     parts.append("- Any atom: `find_atom(query)` → `get_evidence(atom_id)`")
     parts.append("- Open assumptions: `list_missing_details()`\n")
 

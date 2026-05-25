@@ -16,7 +16,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# v2.0: Docling is the primary PDF parser. ~10× faster than marker-pdf on
+# M-series Macs, emits structured equations/tables/figures via the
+# DoclingDocument tree (no regex-over-markdown).
 pdf = [
+  "docling>=2.0",
+]
+# Legacy backend, behind `parser.pdf_backend = "marker"`. Kept for one release
+# so users can A/B against the prior artifact. Will be removed in v1.1.
+pdf-legacy = [
   "marker-pdf>=0.2.17",
 ]
 indexes = [

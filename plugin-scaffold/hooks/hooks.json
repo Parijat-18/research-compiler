@@ -1,6 +1,61 @@
 {
+  "_comment": "v2.0 lifecycle hooks. SessionStart: setup.sh (idempotent project config) then session-start.sh (context injection). UserPromptSubmit detects intent. PostToolUse logs decisions/ingests. Stop emits session note. PreToolUse: enforce-mcp-access.sh blocks direct research/ reads; check-assumptions.sh warns on assumption violations.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/detect-intent.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__paper-compiler__record_decision|mcp__paper-compiler__append_session_note|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-tool.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop.sh"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
+      {
+        "matcher": "Read|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/enforce-mcp-access.sh"
+          }
+        ]
+      },
       {
         "matcher": "Write|Edit",
         "hooks": [

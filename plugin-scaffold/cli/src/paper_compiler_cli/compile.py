@@ -41,6 +41,18 @@ async def build_paper(cfg: Config, paper_id_or_input: str, out: Path, refresh: b
 
     out.mkdir(parents=True, exist_ok=True)
     (out / "evidence").mkdir(exist_ok=True)
+    # v2.0 memory layer: cross-session decisions log + per-session notes dir.
+    # Created here (not by the MCP server) so the artifact ships ready for
+    # writes from the Stop hook + record_decision MCP tool.
+    (out / "sessions").mkdir(exist_ok=True)
+    decisions_path = out / "decisions.md"
+    if not decisions_path.exists():
+        decisions_path.write_text(
+            "# Decisions & Gotchas\n\n"
+            "Append-only. Written by `mcp__paper-compiler__record_decision`.\n"
+            "Each entry: H2 with ISO timestamp + slug, then **Key:** value bullets.\n",
+            encoding="utf-8",
+        )
     started = time.time()
 
     candidates = await resolve(cfg, paper_id_or_input)
@@ -114,6 +126,23 @@ async def build_paper(cfg: Config, paper_id_or_input: str, out: Path, refresh: b
             "abstract": target_paper.metadata.abstract,
         }
         communities = detect_and_summarize(cfg, atoms, edges, paper_records)
+
+        # Phase 3: aggregate per-source acquisition counts so the manifest
+        # makes "where did the corpus come from?" visible.
+        sources_used: dict[str, int] = {}
+        target_src = (
+            target_paper.acquisition.source
+            if target_paper.acquisition
+            else "unavailable"
+        )
+        sources_used[target_src] = sources_used.get(target_src, 0) + 1
+        for np in neighborhood.papers.values():
+            if np.parsed is not None and np.parsed.acquisition is not None:
+                src = np.parsed.acquisition.source
+            else:
+                src = "unavailable"
+            sources_used[src] = sources_used.get(src, 0) + 1
+        neighborhood.stats["papers_by_source"] = sources_used
     except Exception as e:  # noqa: BLE001
         print(f"community detection skipped: {e}", file=sys.stderr)
         communities = []
@@ -131,7 +160,7 @@ async def build_paper(cfg: Config, paper_id_or_input: str, out: Path, refresh: b
                 ingest_paper(conn, np.parsed, is_target=False, depth=np.depth, acquired=np.acquired)
             else:
                 # metadata-only paper (no full text)
-                from .ir import Author, Metadata, Paper as PaperIR
+                from .ir import Acquisition, Author, Metadata, Paper as PaperIR
                 rec = np.record or {}
                 stub = PaperIR(
                     paper_id=pid,
@@ -142,15 +171,22 @@ async def build_paper(cfg: Config, paper_id_or_input: str, out: Path, refresh: b
                         venue=rec.get("venue"),
                         abstract=rec.get("abstract"),
                     ),
+                    acquisition=Acquisition(
+                        source="unavailable",
+                        fetched_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    ),
                 )
                 ingest_paper(conn, stub, is_target=False, depth=np.depth, acquired=False)
-        ingest_atoms_and_edges(conn, atoms, evidence, edges)
+        ingest_stats = ingest_atoms_and_edges(conn, atoms, evidence, edges) or {}
+        neighborhood.stats["evidence_chunk_resolved"] = ingest_stats.get("evidence_chunk_resolved", 0)
+        neighborhood.stats["evidence_total"] = ingest_stats.get("evidence_total", 0)
         from .atoms.extract import collect_missing_details
         ingest_missing(conn, collect_missing_details(target_paper, atoms))
         ingest_scores(conn, scores)
         if communities:
             ingest_communities(conn, communities)
-        set_meta(conn, "schema_version", "1.0")
+        from .graph_db import SCHEMA_VERSION
+        set_meta(conn, "schema_version", SCHEMA_VERSION)
         set_meta(conn, "target_paper_id", target_paper.paper_id)
         set_meta(conn, "compiled_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
@@ -173,10 +209,35 @@ async def build_paper(cfg: Config, paper_id_or_input: str, out: Path, refresh: b
                     atom_texts = [f"{a.name}. {a.description}" for a in atoms]
                     vecs = model.encode(atom_texts, normalize_embeddings=True, show_progress_bar=False)
                     write_atom_embeddings_vec(conn, [a.id for a in atoms], np.asarray(vecs, dtype="float32"))
+                # Communities (Phase 7): embed label + summary for the
+                # "global" query mode. Empty-summary communities still get
+                # an embedding from the label so KNN never misses them.
+                if communities:
+                    from .graph_db import write_community_embeddings_vec
+                    comm_texts = [
+                        f"{c.label}. {c.summary or ''}".strip() or c.label or f"Community {c.id}"
+                        for c in communities
+                    ]
+                    vecs = model.encode(comm_texts, normalize_embeddings=True, show_progress_bar=False)
+                    write_community_embeddings_vec(
+                        conn,
+                        [c.id for c in communities],
+                        np.asarray(vecs, dtype="float32"),
+                    )
             except ImportError:
                 print("embeddings: sentence-transformers missing; vec tables stay empty", file=sys.stderr)
             except Exception as e:  # noqa: BLE001
                 print(f"embedding failed: {e}", file=sys.stderr)
+
+        # Phase 8: re-embed promoted wiki answers so retrieval finds them.
+        # Runs AFTER chunk + atom + community embeddings so the answer
+        # vectors land in the same chunks_vec table as everything else.
+        try:
+            from .wiki_ingest import reembed_wiki_answers
+            wiki_stats = reembed_wiki_answers(conn, out, vec_loaded=vec_loaded)
+            neighborhood.stats["wiki_answers_indexed"] = wiki_stats.get("answers", 0)
+        except Exception as e:  # noqa: BLE001
+            print(f"wiki re-embed skipped: {e}", file=sys.stderr)
 
         conn.commit()
         conn.close()
@@ -230,6 +291,23 @@ async def build_paper(cfg: Config, paper_id_or_input: str, out: Path, refresh: b
         print(f"wiki log skipped: {e}", file=sys.stderr)
 
     write_manifest(out / "build-manifest.json", graph_doc, target_paper, started)
+
+    # Phase F: per-paper context fragment read by SessionStart hook so a fresh
+    # Claude session sees paper-specific routing hints without making any tool
+    # calls. Cheap; pure markdown render from objects already in scope.
+    try:
+        from .render.paper_context import write_paper_context
+        from .atoms.extract import collect_missing_details
+        write_paper_context(
+            out / "CLAUDE-PAPER-CONTEXT.md",
+            target=target_paper,
+            atoms=atoms,
+            graph_doc=graph_doc,
+            missing_details=collect_missing_details(target_paper, atoms),
+            neighborhood_stats=neighborhood.stats,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"paper-context render skipped: {e}", file=sys.stderr)
 
     print(f"compiled {target_paper.paper_id} → {out}", file=sys.stderr)
     return 0

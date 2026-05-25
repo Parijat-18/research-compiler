@@ -9,7 +9,7 @@ from ..classify.edge import ClassifiedEdge, best_role
 from ..expand import Neighborhood
 from ..ir import Paper
 
-SCHEMA_VERSION = "1.0"
+from ..graph_db import SCHEMA_VERSION  # re-export so graph.json declares the artifact version
 
 
 def _paper_node(target: Paper, neighborhood: Neighborhood, scores: dict[str, dict[str, float]]) -> dict[str, Any]:
@@ -67,6 +67,12 @@ def _edge_node(edges: list[ClassifiedEdge], atoms: list[Atom]) -> dict[str, Any]
             "classifier": ce.classifier,
             "best_role": role,
             "best_confidence": round(conf, 3),
+            # Phase 1 schema columns; populated by Phase 4 intent classifier.
+            "provenance_rule": getattr(ce, "provenance_rule", None),
+            "citation_intent": getattr(ce, "citation_intent", None),
+            "intent_confidence": getattr(ce, "intent_confidence", None),
+            "intents": getattr(ce, "intents", None) or [],
+            "weight": getattr(ce, "weight", None),
         }
     return out
 
@@ -75,8 +81,10 @@ def _atom_node(atoms: list[Atom]) -> dict[str, Any]:
     return {
         a.id: {
             "id": a.id,
+            "uid": a.uid,
             "name": a.name,
             "category": a.category,
+            "subcategory": a.subcategory,
             "defined_by_paper_id": a.defined_by_paper_id,
             "used_by_paper_ids": a.used_by_paper_ids,
             "description": a.description,
@@ -96,6 +104,9 @@ def _evidence_node(evidence: list[EvidenceSpan]) -> dict[str, Any]:
             "paper_id": e.paper_id,
             "section_id": e.section_id,
             "section_type": e.section_type,
+            "paragraph_id": e.paragraph_id,
+            "char_start": e.char_start,
+            "char_end": e.char_end,
             "verbatim_text": e.verbatim_text,
             "char_range": list(e.char_range) if e.char_range else None,
             "supports_atom_ids": e.supports_atom_ids,

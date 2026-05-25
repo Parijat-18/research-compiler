@@ -35,7 +35,8 @@ wiki/
 ```
 # <atom name>
 
-- **Category:** `architecture | loss | dataset | preprocessing | evaluation | baseline | optimizer | hyperparameter | training_trick`
+- **Category:** `method | objective | data | preprocessing | evaluation | baseline | procedure | parameter | theory` (domain-neutral; works for ML, physics, chemistry, biology, etc.)
+- **Subcategory:** *(optional)* free-text refinement set by the LLM extractor
 - **Atom ID:** `atom-001`
 - **Defined by:** [[paper-<safe-id>|Paper title]]
 - **Priority:** 0.0–1.0
@@ -125,9 +126,9 @@ answered_with:
 paper cited. Inline citations use [chunk_id=46] format.>
 
 ## Sources
-- [[atom-013|CEM optimizer]]
-- [[paper-…|The Cross-Entropy Method (Rubinstein 1999)]]
-- chunk 46 (paper `s2:530dab…`, section `sec-27`)
+- [[atom-013|<atom name>]]
+- [[paper-…|<paper title>]]
+- chunk 46 (paper `s2:…`, section `sec-…`)
 ```
 
 ## `log.md`

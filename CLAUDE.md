@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `research-compiler` is a Claude Code **plugin** (not a standalone CLI) that compiles a research paper plus its citation neighborhood into a Graph RAG store under `research/`. The plugin source lives entirely in `plugin-scaffold/`; the repo root is a documentation + scaffold container.
 
-`plugin-scaffold/CLAUDE.md` contains workflow conventions that apply **inside a consumer repo that has a `research/` directory** (read brief first, prefer `mcp__paper-compiler__*` over recall, etc.). Those rules are not about *developing this plugin* — they are loaded by the plugin into the user's session. Do not confuse them with build instructions here.
-
 ## Three-plane architecture (the load-bearing invariant)
 
 ```
@@ -16,7 +14,23 @@ research/ artifact      →  on disk, git-friendly, ~26 MB/paper
 MCP server (server/)    →  reads research/    (runtime only, read-only)
 ```
 
-The CLI **never** serves queries. The MCP server **never** writes. Anything that blurs this boundary is a bug. The wiki, DB, and evidence/ are all pure functions of `graph.json` + parsed IR — regenerable from cache without re-acquiring papers.
+The CLI **never** serves queries. The MCP server **never** writes the structured artifact (`research.db`, `graph.json`, `wiki/`). Anything that blurs this boundary is a bug. The wiki, DB, and evidence/ are all pure functions of `graph.json` + parsed IR — regenerable from cache without re-acquiring papers.
+
+v2.0 adds a **memory plane** alongside the structured artifact: `research/decisions.md` (append-only structured gotchas) and `research/sessions/<date>-<slug>.md` (one per Claude Code session). These are human-meant-to-write markdown; the MCP server exposes `record_decision` + `append_session_note` write tools (ask-gated). The original three-plane invariant holds for the *structured* artifact — markdown memory is a separate, additive plane.
+
+## v2.0 changes — Claude Code integration layer
+
+The v1.0 work (Phases 1–8) fixed the artifact's internal quality (stable atom UIDs, evidence chunk-ID provenance, citation-intent edges, neighborhood-wide atoms, index-everything, query-time community routing, domain-neutral categories). v2.0 (Phases A–F) wires that artifact into Claude Code as a first-class plugin:
+
+- **`.claude-plugin/plugin.json`** declares 8 slash commands + hooks + mcpServers references.
+- **`.claude/settings.json`** ships hard `denyTools` patterns on `research/wiki/atoms/`, `research/evidence/`, `research/graph.json`, `research/research.db` — the MCP layer is no longer optional.
+- **Hooks**: SessionStart injects the per-paper `CLAUDE-PAPER-CONTEXT.md` into the system prompt; UserPromptSubmit routes intent to the right sub-skill; Stop writes a session note to `research/sessions/`; PostToolUse appends decision/ingest events to `wiki/log.md`.
+- **24 SKILL.md files**: 6 parent skills + 14 sub-skills (7 implement-* + 7 audit-*) + 2 new top-level (`compare-corpora`, `resume-session`). Each sub-skill `context: fork` with a tight `allowed-tools` whitelist.
+- **8 hook + skill scripts** (`scripts/`): deterministic checks (validate-build-manifest, lint-wikilinks, select-playbook, adjust-research-dir, reconstruct-progress) replacing markdown procedures for Claude to interpret.
+- **7 new MCP tools**: `get_paper_context`, `list_sessions`, `resume_session`, `get_decisions_since`, `record_decision`, `append_session_note`, `bind_research_dir`. Total surface: 26 tools.
+- **Per-paper context fragment**: `research/CLAUDE-PAPER-CONTEXT.md` emitted by the CLI on every compile; ~40 lines of routing hints + atom-category breakdown + source coverage + hard rules. Inlined by SessionStart.
+
+`plugin-scaffold/CLAUDE.md` contains workflow conventions that apply **inside a consumer repo that has a `research/` directory**. Those rules are not about *developing this plugin* — they are loaded by the plugin into the user's session. Do not confuse them with build instructions here.
 
 ## Pipeline (9 stages, content-addressed cache at `~/.cache/paper-compiler/`)
 

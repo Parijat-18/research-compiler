@@ -1,13 +1,25 @@
 """Atom deduplication.
 
-Existing per-paragraph extraction yields many near-duplicates ("ViT encoder",
-"Vision Transformer encoder", "ViT", same atom 3x). Three passes:
+Per-paragraph extraction yields many near-duplicates of the same concept
+(e.g. an ML paper might emit "ViT encoder", "Vision Transformer encoder",
+"ViT" as three atoms; a chemistry paper might emit "Heck coupling",
+"Heck cross-coupling reaction"). Three passes:
 
 1. **Exact normalize**: strip punctuation, lowercase, sort tokens. Merge.
 2. **Jaccard / containment**: pair atoms with token overlap above a threshold
    AND matching category. Merge.
-3. **Embedding cosine** (optional): if SPECTER2 / bge embedder is available,
-   merge atoms in the same category with cosine ≥ ``threshold``.
+3. **Embedding cosine** (optional): if a sentence-transformer embedder is
+   available, merge atoms in the same category with cosine ≥ the
+   per-category threshold.
+
+Per-category dedup thresholds (domain-neutral):
+- ``data`` is strict (0.95) — named samples / datasets / measurement sets
+  should NOT collapse ("ImageNet" vs "ImageNet-21k", "GTEx v8" vs "GTEx v6").
+- ``method`` is loose (0.85) — named methods have many surface forms
+  ("ViT" / "Vision Transformer / "ViT-B/16", or "Heck coupling" / "Mizoroki-Heck
+  reaction").
+- ``objective``, ``procedure``, ``preprocessing`` sit in the middle.
+- Default: 0.88.
 
 Merging strategy: keep the highest-priority atom, fold ``used_by_paper_ids``,
 ``evidence_span_ids``, and ``dependencies`` into it.
@@ -20,6 +32,23 @@ import sys
 from typing import Iterable, Optional
 
 from . import Atom
+
+# Per-category cosine thresholds (domain-neutral). Strict for *data* and
+# *baseline* (distinct named datasets / reference methods must stay
+# separate); loose for *method* (surface-form variation is high across
+# domains); medium elsewhere.
+DEDUP_COSINE_BY_CATEGORY: dict[str, float] = {
+    "data": 0.95,
+    "evaluation": 0.92,
+    "baseline": 0.92,
+    "method": 0.85,
+    "objective": 0.88,
+    "procedure": 0.90,
+    "parameter": 0.90,
+    "preprocessing": 0.88,
+    "theory": 0.92,
+}
+DEDUP_COSINE_DEFAULT: float = 0.88
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _STOPWORDS = {
@@ -96,7 +125,13 @@ def _jaccard_pass(atoms: list[Atom], threshold: float = 0.6, containment_thresho
     return out
 
 
-def _embedding_pass(atoms: list[Atom], threshold: float = 0.92) -> list[Atom]:
+def _embedding_pass(atoms: list[Atom], threshold: Optional[float] = None) -> list[Atom]:
+    """Cosine-similarity merge within each category.
+
+    Phase 5: ``threshold`` is per-category by default
+    (``DEDUP_COSINE_BY_CATEGORY``). Passing an explicit float overrides it
+    globally — used in tests and for back-compat.
+    """
     if len(atoms) < 4:
         return atoms
     try:
@@ -123,7 +158,12 @@ def _embedding_pass(atoms: list[Atom], threshold: float = 0.92) -> list[Atom]:
             if existing.category != a.category:
                 continue
             sim = float(np.dot(out_vecs[j], vecs[i]))
-            if sim >= threshold:
+            cat_threshold = (
+                threshold
+                if threshold is not None
+                else DEDUP_COSINE_BY_CATEGORY.get(a.category, DEDUP_COSINE_DEFAULT)
+            )
+            if sim >= cat_threshold:
                 _merge(existing, a)
                 merged = True
                 break
@@ -146,7 +186,8 @@ def _try_load_embedder():
     return None
 
 
-def deduplicate(atoms: list[Atom], *, embedding_threshold: float = 0.92) -> list[Atom]:
+def deduplicate(atoms: list[Atom], *, embedding_threshold: Optional[float] = None) -> list[Atom]:
+    """Three-pass dedup. ``embedding_threshold=None`` means per-category."""
     before = len(atoms)
     atoms = _exact_normalize(atoms)
     atoms = _jaccard_pass(atoms)

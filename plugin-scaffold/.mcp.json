@@ -1,14 +1,12 @@
 {
+  "_comment": "v2.0: PAPER_COMPILER_RESEARCH_DIR uses CLAUDE_PROJECT_DIR (set by Claude Code to the consumer project root). SessionStart hook walks up from cwd if MCP server starts before the project dir is known.",
   "mcpServers": {
     "paper-compiler": {
       "command": "python",
-      "args": [
-        "-m",
-        "paper_compiler_mcp.server"
-      ],
+      "args": ["-m", "paper_compiler_mcp.server"],
       "env": {
         "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/server/src",
-        "PAPER_COMPILER_RESEARCH_DIR": "${PWD}/research"
+        "PAPER_COMPILER_RESEARCH_DIR": "${CLAUDE_PROJECT_DIR}/research"
       }
     }
   }

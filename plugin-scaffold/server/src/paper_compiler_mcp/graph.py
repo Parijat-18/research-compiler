@@ -6,25 +6,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+# v1.0: component vocabulary matches ATOM_CATEGORIES (domain-neutral).
+# A "component" in trace_dependency is a logical layer of the paper's
+# implementation — method, objective, data, etc. — that may be common
+# across fields. Mappings are 1:1 to roles and categories so the MCP
+# trace tool works regardless of domain.
 ROLE_TO_COMPONENT = {
-    "architecture_dependency": "architecture",
-    "loss_function_dependency": "loss",
-    "dataset_dependency": "dataset",
+    "method_dependency": "method",
+    "objective_dependency": "objective",
+    "data_dependency": "data",
     "preprocessing_dependency": "preprocessing",
-    "evaluation_protocol_dependency": "evaluation",
+    "evaluation_dependency": "evaluation",
     "baseline_dependency": "baseline",
-    "optimizer_or_training_trick": "optimizer",
+    "procedure_dependency": "procedure",
+    "theory_dependency": "theory",
 }
 COMPONENT_TO_ROLE = {v: k for k, v in ROLE_TO_COMPONENT.items()}
 ATOM_CATEGORY_TO_COMPONENT = {
-    "architecture": "architecture",
-    "loss": "loss",
-    "dataset": "dataset",
+    "method": "method",
+    "objective": "objective",
+    "data": "data",
     "preprocessing": "preprocessing",
     "evaluation": "evaluation",
     "baseline": "baseline",
-    "optimizer": "optimizer",
-    "training_trick": "optimizer",
+    "procedure": "procedure",
+    "parameter": "procedure",   # parameters are run-time procedural values
+    "theory": "theory",
 }
 
 
@@ -49,6 +56,20 @@ class ResearchGraph:
         self.missing: list[dict] = doc.get("missing_details", []) or []
         self.order: list[dict] = doc.get("implementation_order", []) or []
         self.indexes = _Indexes()
+        # uid → atom_id lookup so MCP callers can pass either identifier.
+        self._uid_index: dict[str, str] = {
+            a["uid"]: aid for aid, a in self.atoms.items() if a.get("uid")
+        }
+
+    def _resolve_atom(self, key: str) -> Optional[dict]:
+        """Look up an atom by either its display id ('atom-001') or its uid."""
+        if not key:
+            return None
+        a = self.atoms.get(key)
+        if a is not None:
+            return a
+        mapped = self._uid_index.get(key)
+        return self.atoms.get(mapped) if mapped else None
 
     # ---------- loading ----------
 
@@ -90,8 +111,8 @@ class ResearchGraph:
             "external_ids": rec.get("external_ids", {}),
             "is_target": rec.get("is_target", False),
             "rank": rec.get("rank"),
-            "atoms_defined": [{"id": a["id"], "name": a["name"], "category": a["category"]} for a in defines],
-            "atoms_used": [{"id": a["id"], "name": a["name"], "category": a["category"]} for a in uses],
+            "atoms_defined": [{"id": a["id"], "uid": a.get("uid"), "name": a["name"], "category": a["category"]} for a in defines],
+            "atoms_used": [{"id": a["id"], "uid": a.get("uid"), "name": a["name"], "category": a["category"]} for a in uses],
         }
 
     def trace(self, component: str) -> dict:
@@ -108,6 +129,7 @@ class ResearchGraph:
             chain.append(
                 {
                     "atom_id": atom["id"],
+                    "atom_uid": atom.get("uid"),
                     "atom_name": atom["name"],
                     "category": atom["category"],
                     "defined_by_paper_id": defining,
@@ -186,6 +208,7 @@ class ResearchGraph:
             out.append(
                 {
                     "id": atom["id"],
+                    "uid": atom.get("uid"),
                     "name": atom["name"],
                     "category": atom["category"],
                     "description": atom.get("description"),
@@ -198,9 +221,9 @@ class ResearchGraph:
         return out
 
     def evidence_for(self, atom_id: str) -> list[dict]:
-        atom = self.atoms.get(atom_id)
+        atom = self._resolve_atom(atom_id)
         if not atom:
-            return [{"error": f"atom {atom_id!r} not found"}]
+            return [{"error": f"atom {atom_id!r} not found (tried both atom_id and atom_uid)"}]
         spans = []
         for eid in atom.get("evidence_span_ids", []):
             ev = self.evidence.get(eid)
@@ -214,6 +237,9 @@ class ResearchGraph:
                     "paper_title": (paper.get("metadata") or {}).get("title"),
                     "section_id": ev.get("section_id"),
                     "section_type": ev.get("section_type"),
+                    "paragraph_id": ev.get("paragraph_id"),
+                    "char_start": ev.get("char_start"),
+                    "char_end": ev.get("char_end"),
                     "verbatim_text": ev.get("verbatim_text"),
                 }
             )
@@ -235,24 +261,26 @@ class ResearchGraph:
         return [eq for eq in data if q in (eq.get("latex") or "").lower()][:10]
 
     def compare(self, atom_a: str, atom_b: str) -> dict:
-        a = self.atoms.get(atom_a)
-        b = self.atoms.get(atom_b)
+        a = self._resolve_atom(atom_a)
+        b = self._resolve_atom(atom_b)
         if not a or not b:
             return {"error": "one or both atoms not found", "a_found": bool(a), "b_found": bool(b)}
         return {
             "a": {
                 "id": a["id"],
+                "uid": a.get("uid"),
                 "name": a["name"],
                 "category": a["category"],
                 "description": a.get("description"),
-                "evidence": self.evidence_for(atom_a),
+                "evidence": self.evidence_for(a["id"]),
             },
             "b": {
                 "id": b["id"],
+                "uid": b.get("uid"),
                 "name": b["name"],
                 "category": b["category"],
                 "description": b.get("description"),
-                "evidence": self.evidence_for(atom_b),
+                "evidence": self.evidence_for(b["id"]),
             },
             "same_category": a["category"] == b["category"],
             "shared_users": sorted(set(a.get("used_by_paper_ids", [])) & set(b.get("used_by_paper_ids", []))),

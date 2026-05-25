@@ -54,15 +54,21 @@ class TokenBucket:
             self._next_at = max(self._next_at, now) + 1.0 / self.rate
 
 
+_SHARED_BUCKET: Optional[TokenBucket] = None
+
+
 class S2Client:
     def __init__(self, cfg: Config, stats: Optional[S2Stats] = None) -> None:
+        global _SHARED_BUCKET
         self.cfg = cfg
         self.stats = stats or S2Stats()
         headers = {"User-Agent": "paper-compiler/0.1"}
         if cfg.s2.api_key:
             headers["x-api-key"] = cfg.s2.api_key
         self._client = httpx.AsyncClient(base_url=BASE, headers=headers, timeout=60.0)
-        self._bucket = TokenBucket(cfg.s2.rate_limit_rps)
+        if _SHARED_BUCKET is None:
+            _SHARED_BUCKET = TokenBucket(cfg.s2.rate_limit_rps)
+        self._bucket = _SHARED_BUCKET
 
     async def aclose(self) -> None:
         await self._client.aclose()

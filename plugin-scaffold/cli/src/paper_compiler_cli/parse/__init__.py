@@ -59,7 +59,7 @@ async def parse_paper(cfg: Config, cand: Candidate, acq: Optional[Acquired]) -> 
 
             pdf_path = acq.cache_path if acq.kind == "pdf" else None
             if pdf_path is not None:
-                paper = parse_pdf(paper, pdf_path)
+                paper = parse_pdf(paper, pdf_path, backend=cfg.parser.pdf_backend)
         except ImportError as e:
             print(f"pdf parser unavailable for {cand.paper_id}: {e}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001

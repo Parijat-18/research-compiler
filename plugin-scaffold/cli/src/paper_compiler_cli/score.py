@@ -59,7 +59,21 @@ def score_papers(
     return out
 
 
-_CATEGORY_ORDER = ("dataset", "preprocessing", "architecture", "loss", "optimizer", "training_trick", "hyperparameter", "evaluation", "baseline")
+# Dependency order: data feeds preprocessing, which feeds the method; the
+# method needs an objective; running it needs a procedure with parameters;
+# the result is checked by evaluation against baselines. Theory atoms sit
+# at the back as priors. Domain-neutral.
+_CATEGORY_ORDER = (
+    "data",
+    "preprocessing",
+    "method",
+    "objective",
+    "procedure",
+    "parameter",
+    "evaluation",
+    "baseline",
+    "theory",
+)
 
 
 def topological_order(atoms: list[Atom]) -> list[dict]:

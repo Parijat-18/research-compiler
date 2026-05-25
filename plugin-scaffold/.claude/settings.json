@@ -1,0 +1,56 @@
+{
+  "_comment": "v2.0 hard MCP enforcement. Atoms, evidence, the graph file, and the DB cannot be Read/Globbed/Grepped directly — Claude must go through the MCP server. research.md, research/decisions.md, research/sessions/*.md, and research/CLAUDE-PAPER-CONTEXT.md stay readable because they're human-meant-to-write markdown.",
+  "permissions": {
+    "autoApprove": [
+      "mcp__paper-compiler__query",
+      "mcp__paper-compiler__route_query_only",
+      "mcp__paper-compiler__paper_summary",
+      "mcp__paper-compiler__find_atom",
+      "mcp__paper-compiler__get_evidence",
+      "mcp__paper-compiler__trace_dependency",
+      "mcp__paper-compiler__list_missing_details",
+      "mcp__paper-compiler__equation_lookup",
+      "mcp__paper-compiler__compare_methods",
+      "mcp__paper-compiler__citation_neighbors",
+      "mcp__paper-compiler__graph_stats",
+      "mcp__paper-compiler__query_chunks",
+      "mcp__paper-compiler__paper_text",
+      "mcp__paper-compiler__community_summary",
+      "mcp__paper-compiler__list_communities",
+      "mcp__paper-compiler__neighborhood_subgraph",
+      "mcp__paper-compiler__shortest_path",
+      "mcp__paper-compiler__graph_sql",
+      "mcp__paper-compiler__schema_doc",
+      "mcp__paper-compiler__get_paper_context",
+      "mcp__paper-compiler__list_sessions",
+      "mcp__paper-compiler__resume_session",
+      "mcp__paper-compiler__get_decisions_since",
+      "mcp__paper-compiler__bind_research_dir"
+    ],
+    "ask": [
+      "mcp__paper-compiler__record_decision",
+      "mcp__paper-compiler__append_session_note"
+    ],
+    "deny": [
+      "Read(research/wiki/atoms/**)",
+      "Read(research/wiki/papers/**)",
+      "Read(research/wiki/communities/**)",
+      "Read(research/evidence/**)",
+      "Read(research/graph.json)",
+      "Read(research/research.db)",
+      "Read(research/research.db-shm)",
+      "Read(research/research.db-wal)",
+      "Read(research/embeddings.npy)",
+      "Read(research/embeddings.json)",
+      "Glob(research/wiki/atoms/**)",
+      "Glob(research/wiki/papers/**)",
+      "Glob(research/wiki/communities/**)",
+      "Glob(research/evidence/**)",
+      "Grep(research/wiki/atoms/**)",
+      "Grep(research/wiki/papers/**)",
+      "Grep(research/wiki/communities/**)",
+      "Grep(research/evidence/**)",
+      "Grep(research/graph.json)"
+    ]
+  }
+}

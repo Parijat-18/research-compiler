@@ -51,7 +51,6 @@ def cmd_build(args: argparse.Namespace) -> int:
             "compile.max_wall_seconds": args.max_wall_seconds,
             "compile.classifier_llm_max_calls": 0 if args.no_llm else args.classifier_llm_calls,
             "compile.atom_llm_max_calls": 0 if args.no_llm else args.atom_llm_calls,
-            "compile.atom_paper_count": args.atom_papers,
             "output.research_md_max_tokens": args.research_md_tokens,
         },
     )
@@ -104,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument("--max-wall-seconds", type=int, default=None, help="Wall-clock budget for the compile.")
     p_build.add_argument("--classifier-llm-calls", type=int, default=None, help="Max LLM calls for citation edge classifier.")
     p_build.add_argument("--atom-llm-calls", type=int, default=None, help="Max LLM calls for atom extraction (shared across target + cited papers).")
-    p_build.add_argument("--atom-papers", type=int, default=None, help="How many top-ranked cited papers to extract atoms from in addition to the target (default 10).")
+    # `--atom-papers` was removed in v1.0; Phase 5's budget allocator
+    # distributes calls automatically. Kept as a no-op accepted flag so
+    # existing shell scripts don't error out for one release.
+    p_build.add_argument("--atom-papers", type=int, default=None, help=argparse.SUPPRESS)
     p_build.add_argument("--no-llm", action="store_true", help="Disable LLM passes entirely; heuristics only.")
     p_build.add_argument("--research-md-tokens", type=int, default=None, help="Hard token budget for research.md (default 8000).")
     p_build.set_defaults(func=cmd_build)
